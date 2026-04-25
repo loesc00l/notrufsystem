@@ -297,6 +297,7 @@ $('#btn-collapse-all').addEventListener('click', () => {
   for (const g of buildGroups(state.geraete)) if (g.children.length) state.collapsed.add(g.key);
   renderPruefliste();
 });
+$('#btn-add-zimmer').addEventListener('click', addZimmer);
 
 function chkCell(field, g) {
   const v = g[field] || '';
@@ -321,22 +322,43 @@ function deviceRow(d, role, opts = {}) {
     const arrow = opts.collapsed ? '▶' : '▼';
     zimmerCell = `<button class="toggle-btn" data-toggle="${esc(opts.groupKey)}" type="button" title="Betten ein-/ausblenden">${arrow}</button>${esc(zimmer)}`;
   }
+  // "+ Bett" zeigen, wenn die Zeile ein Zimmer ist (oder eigenständig)
+  const showAddBett = (role === 'room' || role === 'flat') && !!zimmer;
+  const addBettBtn  = showAddBett
+      ? `<button class="btn small mini-action" data-add-bett title="Bett hinzufügen">+ Bett</button>`
+      : '';
+
+  // Status-Badge für die Karten-Ansicht (mobile)
+  const status = d.gesamt_ergebnis || '';
+  const statusBadge = status
+      ? `<span class="badge ${status === 'OK' ? 'ok' : status === 'NOK' ? 'nok' : 'na'}">${status}</span>`
+      : `<span class="badge open">offen</span>`;
 
   tr.innerHTML = `
-    <td>${d.nr}</td>
-    <td><input data-f="raumname" value="${esc(d.raumname)}" /></td>
-    <td>${zimmerCell}</td>
-    <td>${esc(bett)}</td>
-    <td>${chkCell('sichtpruefung', d)}</td>
-    <td>${chkCell('befestigung', d)}</td>
-    <td>${chkCell('rufausloesung', d)}</td>
-    <td>${chkCell('opt_anzeige', d)}</td>
-    <td>${chkCell('quittierung', d)}</td>
-    <td>${chkCell('gesamt_ergebnis_x', d).replace('data-field="gesamt_ergebnis_x"','data-field="gesamt_ergebnis"')}
-       <br><button class="btn small" data-allok>Alle OK</button></td>
-    <td><input data-f="bemerkung" value="${esc(d.bemerkung)}" /></td>
-    <td><input data-f="geprueft_von" value="${esc(d.geprueft_von)}" /></td>
-    <td><input data-f="geprueft_am" type="datetime-local" step="60" value="${tsToLocal(d.geprueft_am)}" /></td>
+    <td data-c="nr">${d.nr}</td>
+    <td data-c="raumname"><input data-f="raumname" value="${esc(d.raumname)}" placeholder="Raumname" /></td>
+    <td data-c="zimmer">
+      <span class="cell-zimmer">${zimmerCell}</span>
+      ${addBettBtn}
+      <span class="mobile-status">${statusBadge}</span>
+    </td>
+    <td data-c="bett">${esc(bett)}</td>
+    <td data-c="sicht" class="m-hide">${chkCell('sichtpruefung', d)}</td>
+    <td data-c="bef"   class="m-hide">${chkCell('befestigung', d)}</td>
+    <td data-c="ruf"   class="m-hide">${chkCell('rufausloesung', d)}</td>
+    <td data-c="opt"   class="m-hide">${chkCell('opt_anzeige', d)}</td>
+    <td data-c="quitt" class="m-hide">${chkCell('quittierung', d)}</td>
+    <td data-c="actions" class="actions-cell">
+      <span class="desktop-only">${chkCell('gesamt_ergebnis_x', d).replace('data-field="gesamt_ergebnis_x"','data-field="gesamt_ergebnis"')}</span>
+      <div class="quick-actions">
+        <button class="btn primary quick-ok"  data-allok  type="button">✓ Alle OK</button>
+        <button class="btn danger  quick-nok" data-allnok type="button">✗ NOK</button>
+        <button class="btn small mini-action" data-del-row type="button" title="Eintrag löschen">✕</button>
+      </div>
+    </td>
+    <td data-c="bemerkung"><input data-f="bemerkung" value="${esc(d.bemerkung)}" placeholder="Bemerkung / Mangelbeschreibung" /></td>
+    <td data-c="von"  class="m-hide"><input data-f="geprueft_von" value="${esc(d.geprueft_von)}" placeholder="Prüfer" /></td>
+    <td data-c="zeit" class="m-hide"><input data-f="geprueft_am"  type="datetime-local" step="60" value="${tsToLocal(d.geprueft_am)}" /></td>
   `;
   return tr;
 }
@@ -402,6 +424,61 @@ function tsForDisplay(ts){
        +' '+p(d.getHours())+':'+p(d.getMinutes());
 }
 
+/* ------------------------------------------------------------------ *
+ *  Räume / Betten anlegen + entfernen
+ * ------------------------------------------------------------------ */
+function nextGeraetNr(){
+  return state.geraete.length
+    ? Math.max(...state.geraete.map(g => g.nr || 0)) + 1
+    : 1;
+}
+
+async function addZimmer(){
+  if (!state.protokollId) { toast('Kein Protokoll ausgewählt'); return; }
+  const name = (prompt('Name des neuen Zimmers (z. B. "U99" oder "AB 12"):') || '').trim();
+  if (!name) return;
+  const row = {
+    protokoll_id: state.protokollId,
+    nr: nextGeraetNr(),
+    zimmer: name,
+    bett: null
+  };
+  const { error } = await sb.from('geraete').insert(row);
+  if (error) { toast('Fehler: ' + error.message); return; }
+  await loadGeraete();
+  toast('Zimmer "' + name + '" angelegt.');
+}
+
+async function addBettToRoom(parentDev){
+  if (!state.protokollId) { toast('Kein Protokoll ausgewählt'); return; }
+  const bett = (prompt('Bett-Bezeichnung für ' + (parentDev.zimmer || '') + ' (z. B. "A", "B", "1"):') || '').trim();
+  if (!bett) return;
+  const row = {
+    protokoll_id: state.protokollId,
+    nr: nextGeraetNr(),
+    zimmer: parentDev.zimmer,
+    bett,
+    raumname: parentDev.raumname,
+    geraetetyp: parentDev.geraetetyp
+  };
+  const { error } = await sb.from('geraete').insert(row);
+  if (error) { toast('Fehler: ' + error.message); return; }
+  await loadGeraete();
+  toast('Bett "' + bett + '" zu ' + (parentDev.zimmer || '') + ' hinzugefügt.');
+}
+
+async function deleteGeraet(id){
+  const g = state.geraete.find(x => x.id === id);
+  if (!g) return;
+  const label = (g.zimmer || '?') + (g.bett ? ' / ' + g.bett : '') + ' (Nr. ' + g.nr + ')';
+  if (!confirm('Eintrag "' + label + '" wirklich löschen?')) return;
+  const { error } = await sb.from('geraete').delete().eq('id', id);
+  if (error) { toast('Fehler: ' + error.message); return; }
+  await loadGeraete();
+  await loadMaengel();
+  toast('Eintrag "' + label + '" gelöscht.');
+}
+
 // Delegiertes Event-Handling für Prüf-Buttons und Text-Inputs
 $('#pruefliste-body').addEventListener('click', async (e) => {
   // Aufklapp-/Zuklapp-Toggle für Räume
@@ -418,6 +495,30 @@ $('#pruefliste-body').addEventListener('click', async (e) => {
   const row = e.target.closest('tr[data-id]');
   if (!row) return;
   const id = Number(row.dataset.id);
+
+  // "+ Bett" am Zimmer
+  if (e.target.closest('[data-add-bett]')) {
+    const parentDev = state.geraete.find(d => d.id === id);
+    if (parentDev) await addBettToRoom(parentDev);
+    return;
+  }
+  // Eintrag löschen
+  if (e.target.closest('[data-del-row]')) {
+    await deleteGeraet(id);
+    return;
+  }
+  // "✗ NOK" - Gesamtergebnis NOK + Fokus auf Bemerkung
+  if (e.target.matches('[data-allnok]')) {
+    const patch = { gesamt_ergebnis: 'NOK', geprueft_am: new Date().toISOString() };
+    await patchGeraet(id, patch, row);
+    // Den Bemerkung-Input direkt fokussieren (Karte neu gerendert -> per id wiederfinden)
+    setTimeout(() => {
+      const r = $(`tr[data-id="${id}"]`);
+      const bem = r && r.querySelector('[data-f="bemerkung"]');
+      if (bem) { bem.focus(); bem.scrollIntoView({behavior:'smooth', block:'center'}); }
+    }, 60);
+    return;
+  }
 
   // "Alle OK" Button - bei einem Zimmer auch alle zugehörigen Betten setzen
   if (e.target.matches('[data-allok]')) {
