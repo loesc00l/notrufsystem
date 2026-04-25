@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Notrufsystem - Prüfprotokoll nach DIN VDE 0834</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ========== LOGIN ========== -->
+<section id="view-login" class="view">
+  <div class="card login-card">
+    <h1>Prüfprotokoll Notrufsystem</h1>
+    <p class="muted">Nach DIN VDE 0834</p>
+    <form id="login-form">
+      <label>E-Mail
+        <input type="email" id="login-email" required autocomplete="email" />
+      </label>
+      <label>Passwort
+        <input type="password" id="login-password" required autocomplete="current-password" />
+      </label>
+      <div class="row">
+        <button type="submit" class="btn primary">Anmelden</button>
+        <button type="button" id="btn-signup" class="btn">Registrieren</button>
+      </div>
+      <p id="login-error" class="error"></p>
+    </form>
+  </div>
+</section>
+
+<!-- ========== APP ========== -->
+<section id="view-app" class="view hidden">
+
+  <!-- ===== Kopfzeile ===== -->
+  <header class="appbar">
+    <div class="appbar-left">
+      <strong>Prüfprotokoll</strong>
+      <select id="protokoll-select" title="Protokoll wählen"></select>
+      <button class="btn" id="btn-new-protokoll">+ Neu</button>
+    </div>
+    <div class="appbar-right">
+      <span id="user-email" class="muted"></span>
+      <button class="btn" id="btn-logout">Abmelden</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="deckblatt">Deckblatt</button>
+    <button class="tab" data-tab="pruefliste">Prüfliste <span id="count-geraete" class="pill"></span></button>
+    <button class="tab" data-tab="maengel">Mängelliste <span id="count-maengel" class="pill"></span></button>
+    <button class="tab" data-tab="export">Export</button>
+  </nav>
+
+  <!-- ===== DECKBLATT ===== -->
+  <section class="tab-panel" data-panel="deckblatt">
+    <div class="card">
+      <h2>Deckblatt / Stammdaten</h2>
+      <form id="deckblatt-form" class="grid-2">
+        <label>Krankenhaus / Einrichtung <input name="krankenhaus" /></label>
+        <label>Station / Bereich <input name="station" /></label>
+        <label>Anlage / System <input name="anlage" /></label>
+        <label>Verantwortl. Techniker <input name="verantwortlicher" /></label>
+        <label>Prüfdatum von <input type="date" name="pruefdatum_von" /></label>
+        <label>Prüfdatum bis <input type="date" name="pruefdatum_bis" /></label>
+        <label>Prüfer (Name) <input name="pruefer" /></label>
+        <label>Qualifikation / Firma <input name="qualifikation" /></label>
+        <label>Prüfauftrag-Nr. <input name="auftrag_nr" /></label>
+        <label>Nächste Prüfung fällig <input type="date" name="naechste_pruefung" /></label>
+        <label class="col-span-2">Bemerkung <textarea name="bemerkung" rows="3"></textarea></label>
+        <div class="col-span-2 row">
+          <button type="submit" class="btn primary">Speichern</button>
+          <span id="deckblatt-status" class="muted"></span>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===== PRÜFLISTE ===== -->
+  <section class="tab-panel hidden" data-panel="pruefliste">
+    <div class="card">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <h2>Prüfliste - alle Geräte</h2>
+        <div class="row">
+          <input id="filter-input" placeholder="Suchen: Raum / Anzeige / Typ..." />
+          <select id="filter-status">
+            <option value="">Status: alle</option>
+            <option value="open">offen (leer)</option>
+            <option value="OK">OK</option>
+            <option value="NOK">NOK</option>
+            <option value="NA">N/A</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-pruefliste">
+          <thead>
+            <tr>
+              <th>Nr.</th>
+              <th>Raumname</th>
+              <th>Anzeige</th>
+              <th>Bett</th>
+              <th>Typ</th>
+              <th>Sonderf.</th>
+              <th>ZBUS</th>
+              <th>LON-ID</th>
+              <th title="Sichtprüfung">Sicht</th>
+              <th title="Befestigung">Bef.</th>
+              <th title="Rufauslösung">Ruf</th>
+              <th title="Akustisches Signal">Akust.</th>
+              <th title="Optische Anzeige">Opt.</th>
+              <th title="Weiterleitung">Weiter</th>
+              <th title="Quittierung">Quitt.</th>
+              <th title="Notstrom">Notstr.</th>
+              <th>Gesamt</th>
+              <th>Bemerkung</th>
+              <th>Prüfer</th>
+              <th>Datum</th>
+            </tr>
+          </thead>
+          <tbody id="pruefliste-body"></tbody>
+        </table>
+      </div>
+      <p class="muted small">Klick auf OK/NOK/NA pro Kriterium. "Alle OK" Button pro Zeile setzt alle Prüfungen auf OK und das Gesamtergebnis auf OK.</p>
+    </div>
+  </section>
+
+  <!-- ===== MÄNGEL ===== -->
+  <section class="tab-panel hidden" data-panel="maengel">
+    <div class="card">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <h2>Mängelliste & Massnahmenplan</h2>
+        <button class="btn primary" id="btn-add-mangel">+ Mangel erfassen</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Nr.</th>
+              <th>Raumname</th>
+              <th>Anzeige</th>
+              <th>Bett</th>
+              <th>Typ</th>
+              <th>Prüfdatum</th>
+              <th>Mangelbeschreibung</th>
+              <th>Sofortmaßnahme</th>
+              <th>Priorität</th>
+              <th>Verantwortl.</th>
+              <th>Erledigt am</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="maengel-body"></tbody>
+        </table>
+      </div>
+      <p class="muted small">NOK-Geräte aus der Prüfliste werden automatisch als Mangel angelegt.</p>
+    </div>
+  </section>
+
+  <!-- ===== EXPORT ===== -->
+  <section class="tab-panel hidden" data-panel="export">
+    <div class="card">
+      <h2>Export</h2>
+      <p>Das aktuelle Protokoll als Excel-Datei herunterladen oder als PDF drucken.</p>
+      <div class="row">
+        <button class="btn primary" id="btn-export-xlsx">Excel (.xlsx) herunterladen</button>
+        <button class="btn" id="btn-print">PDF drucken (Browser)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Status-Leiste ===== -->
+  <div id="toast" class="toast"></div>
+</section>
+
+<!-- ======= Bibliotheken (CDN) ======= -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
