@@ -37,6 +37,8 @@ const state = {
   geraete: [],
   maengel: [],
   filter: { text: '', status: '' },
+  sort:   { col: 'nr', dir: 'asc' },   // Sortierzustand
+  collapsed: new Set(),                // welche Räume sind zugeklappt
 };
 
 // Sichtbare/genutzte Prüfkriterien (Akust., Weiter., Notstr. wurden entfernt)
@@ -216,7 +218,9 @@ $('#filter-status').addEventListener('change', (e) => { state.filter.status = e.
 function matchesFilter(g) {
   const { text, status } = state.filter;
   if (text) {
-    const hay = [g.raumname, g.anzeige, g.geraetetyp, g.sonderfunktion].filter(Boolean).join(' ').toLowerCase();
+    const hay = [g.raumname, g.anzeige, g.geraetetyp, g.sonderfunktion,
+                 g.bemerkung, g.geprueft_von, g.bett, g.zbus_adresse, g.lon_id]
+                .filter(Boolean).join(' ').toLowerCase();
     if (!hay.includes(text)) return false;
   }
   if (status === 'open'  && g.gesamt_ergebnis)        return false;
@@ -225,6 +229,73 @@ function matchesFilter(g) {
   if (status === 'NA'    && g.gesamt_ergebnis !== 'NA')  return false;
   return true;
 }
+
+/* ----- Gruppierung Raum -> Betten -------------------------------- */
+function getRoomKey(anzeige){
+  if (anzeige == null) return null;
+  const s = String(anzeige);
+  const i = s.indexOf(':');
+  return i >= 0 ? s.slice(0, i) : s;
+}
+function isBedDevice(d){
+  return !!d.anzeige && String(d.anzeige).includes(':');
+}
+function buildGroups(devices){
+  const map = new Map();
+  for (const d of devices) {
+    const key = getRoomKey(d.anzeige) || ('__id_' + d.id);
+    if (!map.has(key)) map.set(key, { key, parent: null, children: [] });
+    const g = map.get(key);
+    if (isBedDevice(d)) g.children.push(d);
+    else if (!g.parent) g.parent = d;
+    else g.children.push(d);
+  }
+  for (const g of map.values()) {
+    g.children.sort((a, b) =>
+      String(a.anzeige||'').localeCompare(String(b.anzeige||''), 'de', { numeric: true }));
+  }
+  return [...map.values()];
+}
+
+/* ----- Sortierung ------------------------------------------------ */
+function compareVals(a, b){
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b), 'de', { numeric: true });
+}
+function sortGroups(groups){
+  const { col, dir } = state.sort;
+  const arr = [...groups];
+  arr.sort((g1, g2) => {
+    const a = (g1.parent || g1.children[0] || {})[col];
+    const b = (g2.parent || g2.children[0] || {})[col];
+    const c = compareVals(a, b);
+    return dir === 'desc' ? -c : c;
+  });
+  return arr;
+}
+function groupMatches(g){
+  return [g.parent, ...g.children].filter(Boolean).some(d => matchesFilter(d));
+}
+
+/* ----- Sortable headers ------------------------------------------ */
+$$('.table-pruefliste thead th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (state.sort.col === col) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+    else { state.sort.col = col; state.sort.dir = 'asc'; }
+    renderPruefliste();
+  });
+});
+
+/* ----- Alle Räume auf-/zuklappen --------------------------------- */
+$('#btn-expand-all').addEventListener('click', () => { state.collapsed.clear(); renderPruefliste(); });
+$('#btn-collapse-all').addEventListener('click', () => {
+  for (const g of buildGroups(state.geraete)) if (g.children.length) state.collapsed.add(g.key);
+  renderPruefliste();
+});
 
 function chkCell(field, g) {
   const v = g[field] || '';
@@ -235,41 +306,88 @@ function chkCell(field, g) {
   </span>`;
 }
 
+function deviceRow(d, role, opts = {}) {
+  // role: 'flat' | 'room' | 'bed'
+  const tr = document.createElement('tr');
+  tr.dataset.id = d.id;
+  tr.classList.add(role + '-row');
+
+  let anzeigeCell = esc(d.anzeige);
+  if (role === 'room' && opts.hasChildren) {
+    const arrow = opts.collapsed ? '▶' : '▼';
+    anzeigeCell = `<button class="toggle-btn" data-toggle="${esc(opts.groupKey)}" type="button" title="Betten ein-/ausblenden">${arrow}</button>${esc(d.anzeige)}`;
+  }
+
+  tr.innerHTML = `
+    <td>${d.nr}</td>
+    <td><input data-f="raumname" value="${esc(d.raumname)}" /></td>
+    <td>${anzeigeCell}</td>
+    <td>${esc(d.bett)}</td>
+    <td>${esc(d.geraetetyp)}</td>
+    <td>${chkCell('sichtpruefung', d)}</td>
+    <td>${chkCell('befestigung', d)}</td>
+    <td>${chkCell('rufausloesung', d)}</td>
+    <td>${chkCell('opt_anzeige', d)}</td>
+    <td>${chkCell('quittierung', d)}</td>
+    <td>${chkCell('gesamt_ergebnis_x', d).replace('data-field="gesamt_ergebnis_x"','data-field="gesamt_ergebnis"')}
+       <br><button class="btn small" data-allok>Alle OK</button></td>
+    <td><input data-f="bemerkung" value="${esc(d.bemerkung)}" /></td>
+    <td><input data-f="geprueft_von" value="${esc(d.geprueft_von)}" /></td>
+    <td><input data-f="geprueft_am" type="date" value="${d.geprueft_am||''}" /></td>
+  `;
+  return tr;
+}
+
 function renderPruefliste() {
   const tbody = $('#pruefliste-body');
   tbody.innerHTML = '';
   const frag = document.createDocumentFragment();
 
-  for (const g of state.geraete) {
-    if (!matchesFilter(g)) continue;
-    const tr = document.createElement('tr');
-    tr.dataset.id = g.id;
-    tr.innerHTML = `
-      <td>${g.nr}</td>
-      <td><input data-f="raumname" value="${esc(g.raumname)}" /></td>
-      <td>${esc(g.anzeige)}</td>
-      <td>${esc(g.bett)}</td>
-      <td>${esc(g.geraetetyp)}</td>
-      <td>${chkCell('sichtpruefung', g)}</td>
-      <td>${chkCell('befestigung', g)}</td>
-      <td>${chkCell('rufausloesung', g)}</td>
-      <td>${chkCell('opt_anzeige', g)}</td>
-      <td>${chkCell('quittierung', g)}</td>
-      <td>${chkCell('gesamt_ergebnis_x', g).replace('data-field="gesamt_ergebnis_x"','data-field="gesamt_ergebnis"')}
-         <br><button class="btn small" data-allok>Alle OK</button></td>
-      <td><input data-f="bemerkung" value="${esc(g.bemerkung)}" /></td>
-      <td><input data-f="geprueft_von" value="${esc(g.geprueft_von)}" /></td>
-      <td><input data-f="geprueft_am" type="date" value="${g.geprueft_am||''}" /></td>
-    `;
-    frag.appendChild(tr);
+  const groups = sortGroups(buildGroups(state.geraete));
+
+  for (const g of groups) {
+    if (!groupMatches(g)) continue;
+    const hasChildren = g.children.length > 0;
+    const collapsed = state.collapsed.has(g.key);
+
+    if (g.parent) {
+      frag.appendChild(deviceRow(
+        g.parent,
+        hasChildren ? 'room' : 'flat',
+        { hasChildren, collapsed, groupKey: g.key }
+      ));
+      if (hasChildren && !collapsed) {
+        for (const c of g.children) frag.appendChild(deviceRow(c, 'bed'));
+      }
+    } else {
+      // Keine Raumzeile vorhanden -> Betten flach anzeigen
+      for (const c of g.children) frag.appendChild(deviceRow(c, 'flat'));
+    }
   }
   tbody.appendChild(frag);
+
+  // Sort-Indikator aktualisieren
+  $$('.table-pruefliste thead th[data-sort]').forEach(th => {
+    th.classList.remove('sorted-asc','sorted-desc');
+    if (th.dataset.sort === state.sort.col) th.classList.add('sorted-' + state.sort.dir);
+  });
 }
 
 function esc(v){ if (v==null) return ''; return String(v).replace(/"/g,'&quot;').replace(/</g,'&lt;') }
 
 // Delegiertes Event-Handling für Prüf-Buttons und Text-Inputs
 $('#pruefliste-body').addEventListener('click', async (e) => {
+  // Aufklapp-/Zuklapp-Toggle für Räume
+  const toggleBtn = e.target.closest('[data-toggle]');
+  if (toggleBtn) {
+    const k = toggleBtn.dataset.toggle;
+    if (state.collapsed.has(k)) state.collapsed.delete(k);
+    else state.collapsed.add(k);
+    e.stopPropagation();
+    renderPruefliste();
+    return;
+  }
+
   const row = e.target.closest('tr[data-id]');
   if (!row) return;
   const id = Number(row.dataset.id);
@@ -422,7 +540,6 @@ $('#btn-print').addEventListener('click', () => window.print());
 $('#btn-export-xlsx').addEventListener('click', () => {
   const wb = XLSX.utils.book_new();
 
-  // Deckblatt
   const d = state.deckblatt || {};
   const deck = [
     ['Prüfprotokoll Notrufsystem - DIN VDE 0834'],
@@ -441,7 +558,6 @@ $('#btn-export-xlsx').addEventListener('click', () => {
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deck), 'Deckblatt');
 
-  // Prüfliste
   const pHeader = ['Nr.','Raumname','Anzeige','Bett','Gerätetyp','SW-Version',
     'Sichtprüfung','Befestigung','Rufauslösung','Opt. Anzeige','Quittierung',
     'Gesamtergebnis','Bemerkung','Geprüft von','Datum'];
@@ -452,7 +568,6 @@ $('#btn-export-xlsx').addEventListener('click', () => {
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([pHeader, ...pRows]), 'Prüfliste');
 
-  // Mängelliste
   const mHeader = ['Nr.','Raumname','Anzeige','Bett','Gerätetyp','Prüfdatum','Mangelbeschreibung','Sofortmaßnahme','Priorität','Verantwortlich','Erledigt am'];
   const mRows = state.maengel.map(m => [m.nr, m.raumname, m.anzeige, m.bett, m.geraetetyp, m.pruefdatum, m.mangelbeschreibung, m.sofortmassnahme, m.prioritaet, m.verantwortlich, m.erledigt_am]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([mHeader, ...mRows]), 'Mängelliste');

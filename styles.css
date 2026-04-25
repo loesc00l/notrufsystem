@@ -84,6 +84,35 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline
 .table-pruefliste td{white-space:nowrap}
 .table-pruefliste td.narrow{max-width:90px;white-space:normal}
 
+/* ---- Sortable headers ---- */
+.table th[data-sort]{cursor:pointer;user-select:none;position:relative;padding-right:1.1rem}
+.table th[data-sort]:hover{background:#ecf2fa}
+.table th[data-sort]::after{content:"⇅";position:absolute;right:.35rem;top:50%;transform:translateY(-50%);opacity:.25;font-size:.75rem}
+.table th[data-sort].sorted-asc::after{content:"▲";opacity:.85;color:var(--primary)}
+.table th[data-sort].sorted-desc::after{content:"▼";opacity:.85;color:var(--primary)}
+
+/* ---- Search bar ---- */
+.search-bar{
+  display:flex;align-items:center;gap:.5rem;margin:.25rem 0 .8rem;
+  background:#f7f9fc;border:1px solid var(--border);border-radius:8px;padding:.4rem .6rem;
+}
+.search-bar #filter-input{flex:1;border:0;background:transparent;font-size:.95rem;padding:.35rem 0}
+.search-bar #filter-input:focus{outline:none}
+.search-icon{opacity:.55;font-size:.95rem}
+
+/* ---- Room/Bed hierarchy ---- */
+.room-row > td{background:#eaf2ff;font-weight:600;border-top:2px solid #c8d8ee}
+.room-row > td:nth-child(3){letter-spacing:.02em}
+.bed-row  > td{background:#fafbfe}
+.bed-row  > td:nth-child(3){padding-left:1.6rem;color:#3b4a72}
+.bed-row  > td:nth-child(3)::before{content:"↳ ";color:var(--muted);margin-right:.15rem}
+
+.toggle-btn{
+  background:transparent;border:0;cursor:pointer;padding:0 .35rem;
+  font-size:.75rem;color:var(--primary);margin-right:.2rem;
+}
+.toggle-btn:hover{color:var(--primary-dark)}
+
 /* Prüf-Zellen als Klick-Buttons */
 .chk{
   display:inline-flex;gap:2px;
