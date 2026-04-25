@@ -39,9 +39,9 @@ const state = {
   filter: { text: '', status: '' },
 };
 
+// Sichtbare/genutzte Prüfkriterien (Akust., Weiter., Notstr. wurden entfernt)
 const CHECK_FIELDS = [
-  'sichtpruefung','befestigung','rufausloesung','akust_signal',
-  'opt_anzeige','weiterleitung','quittierung','notstrom'
+  'sichtpruefung','befestigung','rufausloesung','opt_anzeige','quittierung'
 ];
 
 /* ------------------------------------------------------------------ *
@@ -250,17 +250,11 @@ function renderPruefliste() {
       <td>${esc(g.anzeige)}</td>
       <td>${esc(g.bett)}</td>
       <td>${esc(g.geraetetyp)}</td>
-      <td class="narrow">${esc(g.sonderfunktion)}</td>
-      <td>${esc(g.zbus_adresse)}</td>
-      <td>${esc(g.lon_id)}</td>
       <td>${chkCell('sichtpruefung', g)}</td>
       <td>${chkCell('befestigung', g)}</td>
       <td>${chkCell('rufausloesung', g)}</td>
-      <td>${chkCell('akust_signal', g)}</td>
       <td>${chkCell('opt_anzeige', g)}</td>
-      <td>${chkCell('weiterleitung', g)}</td>
       <td>${chkCell('quittierung', g)}</td>
-      <td>${chkCell('notstrom', g)}</td>
       <td>${chkCell('gesamt_ergebnis_x', g).replace('data-field="gesamt_ergebnis_x"','data-field="gesamt_ergebnis"')}
          <br><button class="btn small" data-allok>Alle OK</button></td>
       <td><input data-f="bemerkung" value="${esc(g.bemerkung)}" /></td>
@@ -448,12 +442,12 @@ $('#btn-export-xlsx').addEventListener('click', () => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deck), 'Deckblatt');
 
   // Prüfliste
-  const pHeader = ['Nr.','Raumname','Anzeige','Bett','Gerätetyp','Sonderfunktion','ZBUS-Adresse','LON-ID','SW-Version',
-    'Sichtprüfung','Befestigung','Rufauslösung','Akust. Signal','Opt. Anzeige','Weiterleitung','Quittierung','Notstrom',
+  const pHeader = ['Nr.','Raumname','Anzeige','Bett','Gerätetyp','SW-Version',
+    'Sichtprüfung','Befestigung','Rufauslösung','Opt. Anzeige','Quittierung',
     'Gesamtergebnis','Bemerkung','Geprüft von','Datum'];
   const pRows = state.geraete.map(g => [
-    g.nr, g.raumname, g.anzeige, g.bett, g.geraetetyp, g.sonderfunktion, g.zbus_adresse, g.lon_id, g.sw_version,
-    g.sichtpruefung, g.befestigung, g.rufausloesung, g.akust_signal, g.opt_anzeige, g.weiterleitung, g.quittierung, g.notstrom,
+    g.nr, g.raumname, g.anzeige, g.bett, g.geraetetyp, g.sw_version,
+    g.sichtpruefung, g.befestigung, g.rufausloesung, g.opt_anzeige, g.quittierung,
     g.gesamt_ergebnis, g.bemerkung, g.geprueft_von, g.geprueft_am
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([pHeader, ...pRows]), 'Prüfliste');
