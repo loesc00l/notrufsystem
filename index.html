@@ -99,7 +99,7 @@
             <tr>
               <th data-sort="nr">Nr.</th>
               <th data-sort="raumname">Raumname</th>
-              <th data-sort="anzeige">Anzeige</th>
+              <th data-sort="anzeige">Zimmer</th>
               <th data-sort="bett">Bett</th>
               <th data-sort="geraetetyp">Typ</th>
               <th data-sort="sichtpruefung"  title="Sichtprüfung">Sicht</th>
@@ -161,6 +161,15 @@
         <button class="btn primary" id="btn-export-xlsx">Excel (.xlsx) herunterladen</button>
         <button class="btn" id="btn-print">PDF drucken (Browser)</button>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Archiv</h2>
+      <p class="muted small">
+        Sobald alle Geräte eines Protokolls geprüft sind, wird es automatisch archiviert.
+        Über "Wieder auswerfen" kannst du ein Protokoll wieder aktivieren.
+      </p>
+      <div id="archive-list" class="archive-list"></div>
     </div>
   </section>
 

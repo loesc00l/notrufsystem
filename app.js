@@ -94,6 +94,7 @@ $$('.tab').forEach(btn => btn.addEventListener('click', () => {
   btn.classList.add('active');
   const t = btn.dataset.tab;
   $$('.tab-panel').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== t));
+  if (t === 'export') loadArchive();
 }));
 
 /* ------------------------------------------------------------------ *
@@ -102,15 +103,21 @@ $$('.tab').forEach(btn => btn.addEventListener('click', () => {
 async function loadProtokolle() {
   const { data, error } = await sb
     .from('protokolle')
-    .select('id, krankenhaus, station, pruefdatum_von, created_at')
+    .select('id, krankenhaus, station, pruefdatum_von, created_at, archived_at')
+    .is('archived_at', null)
     .order('created_at', { ascending: false });
   if (error) { toast('Fehler: ' + error.message); return; }
 
   const sel = $('#protokoll-select');
   sel.innerHTML = '';
   if (!data.length) {
-    sel.innerHTML = '<option value="">(noch kein Protokoll)</option>';
-    await createProtokollPrompt();
+    sel.innerHTML = '<option value="">(kein aktives Protokoll)</option>';
+    state.protokollId = null;
+    state.geraete = []; state.maengel = []; state.deckblatt = null;
+    $('#count-geraete').textContent = '0';
+    $('#count-maengel').textContent = '0';
+    renderPruefliste(); renderMaengel();
+    await loadArchive();
     return;
   }
   for (const p of data) {
@@ -312,17 +319,22 @@ function deviceRow(d, role, opts = {}) {
   tr.dataset.id = d.id;
   tr.classList.add(role + '-row');
 
-  let anzeigeCell = esc(d.anzeige);
+  // Zimmer = Anzeige ohne Bett-Suffix (also alles vor dem ":")
+  const zimmer = getRoomKey(d.anzeige) || '';
+  // Bett = der Buchstabe nach ":", ohne den Doppelpunkt
+  const bettClean = (d.bett ? String(d.bett).replace(/^:/,'') : '');
+
+  let zimmerCell = esc(zimmer);
   if (role === 'room' && opts.hasChildren) {
     const arrow = opts.collapsed ? '▶' : '▼';
-    anzeigeCell = `<button class="toggle-btn" data-toggle="${esc(opts.groupKey)}" type="button" title="Betten ein-/ausblenden">${arrow}</button>${esc(d.anzeige)}`;
+    zimmerCell = `<button class="toggle-btn" data-toggle="${esc(opts.groupKey)}" type="button" title="Betten ein-/ausblenden">${arrow}</button>${esc(zimmer)}`;
   }
 
   tr.innerHTML = `
     <td>${d.nr}</td>
     <td><input data-f="raumname" value="${esc(d.raumname)}" /></td>
-    <td>${anzeigeCell}</td>
-    <td>${esc(d.bett)}</td>
+    <td>${zimmerCell}</td>
+    <td>${esc(bettClean)}</td>
     <td>${esc(d.geraetetyp)}</td>
     <td>${chkCell('sichtpruefung', d)}</td>
     <td>${chkCell('befestigung', d)}</td>
@@ -392,12 +404,26 @@ $('#pruefliste-body').addEventListener('click', async (e) => {
   if (!row) return;
   const id = Number(row.dataset.id);
 
-  // "Alle OK" Button
+  // "Alle OK" Button - bei einem Zimmer auch alle zugehörigen Betten setzen
   if (e.target.matches('[data-allok]')) {
     const patch = {};
     for (const f of CHECK_FIELDS) patch[f] = 'OK';
     patch.gesamt_ergebnis = 'OK';
     await patchGeraet(id, patch, row);
+
+    // Wenn die geklickte Zeile ein Zimmer mit Betten ist: kaskadiere zu allen Betten
+    const groups = buildGroups(state.geraete);
+    const parentDev = state.geraete.find(d => d.id === id);
+    if (parentDev) {
+      const key = getRoomKey(parentDev.anzeige);
+      const grp = groups.find(g => g.key === key);
+      if (grp && grp.parent && grp.parent.id === id && grp.children.length) {
+        toast('Übernehme "Alle OK" auf ' + grp.children.length + ' Bett(en) ...');
+        for (const child of grp.children) {
+          await patchGeraet(child.id, patch, null);
+        }
+      }
+    }
     return;
   }
 
@@ -437,15 +463,24 @@ async function patchGeraet(id, patch, row) {
   if (error) { toast('Fehler: ' + error.message); return; }
   const idx = state.geraete.findIndex(g => g.id === id);
   if (idx >= 0) state.geraete[idx] = data;
-  // Re-render nur diese Zeile: komplette Neu-Zeichnung der Liste ist einfacher
   renderPruefliste();
 
   // Auto-Mangel bei NOK
   if (patch.gesamt_ergebnis === 'NOK') {
     await ensureMangelForGeraet(data);
-  } else if (patch.gesamt_ergebnis && patch.gesamt_ergebnis !== 'NOK') {
-    // Offene Mängel dieses Gerätes auf erledigt setzen? Lieber nicht automatisch löschen.
   }
+
+  // Wenn alle Geräte geprüft sind: automatisch archivieren
+  await maybeArchive();
+}
+
+const CHECK_LABEL = {
+  sichtpruefung:'Sichtprüfung', befestigung:'Befestigung', rufausloesung:'Rufauslösung',
+  opt_anzeige:'Opt. Anzeige', quittierung:'Quittierung'
+};
+
+function failedChecks(g) {
+  return CHECK_FIELDS.filter(f => g[f] === 'NOK').map(f => CHECK_LABEL[f]);
 }
 
 /* ------------------------------------------------------------------ *
@@ -453,7 +488,23 @@ async function patchGeraet(id, patch, row) {
  * ------------------------------------------------------------------ */
 async function ensureMangelForGeraet(g) {
   const existing = state.maengel.find(m => m.geraet_id === g.id && !m.erledigt_am);
-  if (existing) return;
+  const fails = failedChecks(g);
+  const beschreibung = (g.bemerkung && g.bemerkung.trim())
+    ? g.bemerkung
+    : (fails.length ? 'NOK: ' + fails.join(', ') : 'NOK - Details bitte erfassen');
+
+  if (existing) {
+    // Beschreibung beim bestehenden Eintrag aktualisieren, falls noch leer
+    if (!existing.mangelbeschreibung || existing.mangelbeschreibung.startsWith('NOK')) {
+      const { error } = await sb.from('maengel').update({
+        mangelbeschreibung: beschreibung,
+        raumname: g.raumname, anzeige: g.anzeige, bett: g.bett, geraetetyp: g.geraetetyp
+      }).eq('id', existing.id);
+      if (!error) await loadMaengel();
+    }
+    return;
+  }
+
   const m = {
     protokoll_id: state.protokollId,
     geraet_id: g.id,
@@ -463,13 +514,72 @@ async function ensureMangelForGeraet(g) {
     bett: g.bett,
     geraetetyp: g.geraetetyp,
     pruefdatum: g.geprueft_am || new Date().toISOString().slice(0,10),
-    mangelbeschreibung: g.bemerkung || 'NOK - Details bitte erfassen',
+    mangelbeschreibung: beschreibung,
     prioritaet: 'M'
   };
   const { error } = await sb.from('maengel').insert(m);
   if (error) { toast('Mangel: ' + error.message); return; }
   await loadMaengel();
+  toast('Mangel automatisch in die Mängelliste eingetragen.');
 }
+
+/* ------------------------------------------------------------------ *
+ *  Archivierung
+ * ------------------------------------------------------------------ */
+async function maybeArchive() {
+  if (!state.deckblatt || state.deckblatt.archived_at) return;
+  if (!state.geraete.length) return;
+  const allDone = state.geraete.every(g => g.gesamt_ergebnis);
+  if (!allDone) return;
+
+  const stamp = new Date().toISOString();
+  const { error } = await sb.from('protokolle').update({ archived_at: stamp }).eq('id', state.protokollId);
+  if (error) { toast('Archivieren fehlgeschlagen: ' + error.message); return; }
+  state.deckblatt.archived_at = stamp;
+  toast('🗄️ Alle Geräte geprüft - Protokoll wurde archiviert.');
+  await loadProtokolle();      // archivierte werden im Dropdown ausgeblendet
+  await loadArchive();
+}
+
+async function loadArchive() {
+  const { data, error } = await sb
+    .from('protokolle')
+    .select('id, krankenhaus, station, pruefdatum_von, pruefdatum_bis, archived_at')
+    .not('archived_at', 'is', null)
+    .order('archived_at', { ascending: false });
+  if (error) { toast('Archiv: ' + error.message); return; }
+
+  const box = $('#archive-list');
+  box.innerHTML = '';
+  if (!data.length) { box.innerHTML = '<div class="archive-empty">Keine archivierten Protokolle.</div>'; return; }
+  for (const p of data) {
+    const item = document.createElement('div');
+    item.className = 'archive-item';
+    const title = [p.krankenhaus || '(ohne Name)', p.station].filter(Boolean).join(' - ');
+    const dates = [p.pruefdatum_von, p.pruefdatum_bis].filter(Boolean).join(' bis ');
+    const arch = new Date(p.archived_at).toLocaleString('de-DE');
+    item.innerHTML = `
+      <div class="meta">
+        <strong>${esc(title)}</strong>
+        <small>${esc(dates)} ${dates ? '· ' : ''}archiviert: ${esc(arch)}</small>
+      </div>
+      <button class="btn small" data-restore="${p.id}">Wieder auswerfen</button>
+    `;
+    box.appendChild(item);
+  }
+}
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-restore]');
+  if (!btn) return;
+  const pid = btn.dataset.restore;
+  if (!confirm('Protokoll wieder aktivieren? Es erscheint dann wieder im Dropdown.')) return;
+  const { error } = await sb.from('protokolle').update({ archived_at: null }).eq('id', pid);
+  if (error) { toast(error.message); return; }
+  toast('Protokoll wieder aktiviert.');
+  await loadProtokolle();
+  await loadArchive();
+});
 
 $('#btn-add-mangel').addEventListener('click', async () => {
   const { error } = await sb.from('maengel').insert({
@@ -558,18 +668,26 @@ $('#btn-export-xlsx').addEventListener('click', () => {
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deck), 'Deckblatt');
 
-  const pHeader = ['Nr.','Raumname','Anzeige','Bett','Gerätetyp','SW-Version',
+  const pHeader = ['Nr.','Raumname','Zimmer','Bett','Gerätetyp','SW-Version',
     'Sichtprüfung','Befestigung','Rufauslösung','Opt. Anzeige','Quittierung',
     'Gesamtergebnis','Bemerkung','Geprüft von','Datum'];
   const pRows = state.geraete.map(g => [
-    g.nr, g.raumname, g.anzeige, g.bett, g.geraetetyp, g.sw_version,
+    g.nr, g.raumname,
+    getRoomKey(g.anzeige) || '',
+    (g.bett ? String(g.bett).replace(/^:/,'') : ''),
+    g.geraetetyp, g.sw_version,
     g.sichtpruefung, g.befestigung, g.rufausloesung, g.opt_anzeige, g.quittierung,
     g.gesamt_ergebnis, g.bemerkung, g.geprueft_von, g.geprueft_am
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([pHeader, ...pRows]), 'Prüfliste');
 
-  const mHeader = ['Nr.','Raumname','Anzeige','Bett','Gerätetyp','Prüfdatum','Mangelbeschreibung','Sofortmaßnahme','Priorität','Verantwortlich','Erledigt am'];
-  const mRows = state.maengel.map(m => [m.nr, m.raumname, m.anzeige, m.bett, m.geraetetyp, m.pruefdatum, m.mangelbeschreibung, m.sofortmassnahme, m.prioritaet, m.verantwortlich, m.erledigt_am]);
+  const mHeader = ['Nr.','Raumname','Zimmer','Bett','Gerätetyp','Prüfdatum','Mangelbeschreibung','Sofortmaßnahme','Priorität','Verantwortlich','Erledigt am'];
+  const mRows = state.maengel.map(m => [
+    m.nr, m.raumname,
+    getRoomKey(m.anzeige) || '',
+    (m.bett ? String(m.bett).replace(/^:/,'') : ''),
+    m.geraetetyp, m.pruefdatum, m.mangelbeschreibung, m.sofortmassnahme, m.prioritaet, m.verantwortlich, m.erledigt_am
+  ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([mHeader, ...mRows]), 'Mängelliste');
 
   const name = 'Pruefprotokoll_' + (d.krankenhaus || 'Notrufsystem').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.xlsx';

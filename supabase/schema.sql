@@ -21,7 +21,8 @@ create table if not exists public.protokolle (
   qualifikation text,
   auftrag_nr text,
   naechste_pruefung date,
-  bemerkung text
+  bemerkung text,
+  archived_at timestamptz
 );
 
 -- ---------- GERÄTE (Anlagenbestand / Prüfliste) -------------------------

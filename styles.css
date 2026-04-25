@@ -113,6 +113,16 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline
 }
 .toggle-btn:hover{color:var(--primary-dark)}
 
+/* ---- Archive list ---- */
+.archive-list{display:flex;flex-direction:column;gap:.4rem;margin-top:.6rem}
+.archive-item{
+  display:flex;justify-content:space-between;align-items:center;gap:.5rem;
+  padding:.5rem .8rem;border:1px solid var(--border);border-radius:6px;background:#f7f9fc;
+}
+.archive-item .meta{display:flex;flex-direction:column;font-size:.9rem}
+.archive-item .meta small{color:var(--muted)}
+.archive-empty{color:var(--muted);font-style:italic;padding:.5rem 0}
+
 /* Prüf-Zellen als Klick-Buttons */
 .chk{
   display:inline-flex;gap:2px;
