@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Prüfprotokoll Notrufsystem (DIN VDE 0834)
 
 Eine reine Browser-Web-App zur Prüfung und Dokumentation eines Notrufsystems
@@ -100,3 +101,7 @@ Oder jederzeit selbst über **Export → Excel herunterladen** in der App.
 
 Fragen oder Erweiterungen? In der App steckt der komplette Quellcode,
 nichts ist minifiziert.
+=======
+# notrufsystem
+Notrufsystem Test AWO
+>>>>>>> deb7a3de421b76145ba231fb2aabe18fe26e492e
