@@ -1,14 +1,15 @@
-<<<<<<< HEAD
 # Prüfprotokoll Notrufsystem (DIN VDE 0834)
 
-Eine reine Browser-Web-App zur Prüfung und Dokumentation eines Notrufsystems
-nach DIN VDE 0834. Frontend läuft statisch auf **GitHub Pages**, Daten und
-Login laufen über **Supabase** (kostenloser Plan).
+Notrufsystem Test AWO – eine reine Browser-Web-App zur Prüfung und
+Dokumentation eines Notrufsystems nach DIN VDE 0834. Frontend läuft statisch
+auf **GitHub Pages**, Daten und Login laufen über **Supabase** (kostenloser Plan).
+
+**Live-URL:** https://loesc00l.github.io/notrufsystem/
 
 ## Inhalt
 
 - `index.html` / `styles.css` / `app.js` – die Web-App (single page)
-- `config.js` – hier trägst du Supabase-URL und Anon-Key ein
+- `config.js` – Supabase-URL und Anon-Key
 - `supabase/schema.sql` – Tabellen, RLS-Policies, Hilfsfunktion
 - `supabase/seed_geraete.sql` – Stamm-Geräteliste (546 Geräte) für den Katalog
 - `.github/workflows/pages.yml` – automatisches Deployment nach GitHub Pages
@@ -50,22 +51,13 @@ aus dem Katalog übernommen.
 
 ## 3. Deployment auf GitHub Pages
 
-1. Neues Repo auf GitHub anlegen (z. B. `notrufsystem`) und den Inhalt
-   dieses Ordners pushen:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial: Notrufsystem Prüfprotokoll"
-   git branch -M main
-   git remote add origin https://github.com/<user>/notrufsystem.git
-   git push -u origin main
-   ```
+1. Repo auf GitHub: <https://github.com/loesc00l/notrufsystem>
 2. In GitHub **Settings → Pages** als Quelle **"GitHub Actions"** wählen.
 3. Der Workflow `.github/workflows/pages.yml` deployt automatisch nach jedem
-   Push auf `main`. Die URL steht danach in **Settings → Pages**
-   (`https://<user>.github.io/notrufsystem/`).
+   Push auf `main`. Die URL ist:
+   **https://loesc00l.github.io/notrufsystem/**
 4. In Supabase unter **Authentication → URL Configuration**:
-   - **Site URL** auf die GitHub-Pages-URL setzen
+   - **Site URL** auf `https://loesc00l.github.io/notrufsystem/` setzen
    - ggf. auch als "Additional Redirect URL"
 
 ## 4. Bedienung
@@ -89,19 +81,9 @@ Tipps:
 
 Jeder Prüfer registriert sich mit eigener E-Mail. Wenn mehrere Leute am
 selben Protokoll arbeiten sollen, passe `supabase/schema.sql` an – aktuell
-sieht nur der Besitzer (`owner`) sein Protokoll (RLS). Alternativen:
-gemeinsamer Login, oder Policies umstellen auf "alle authenticated".
+sieht nur der Besitzer (`owner`) sein Protokoll (RLS).
 
 ## 6. Backup
 
 In Supabase: **Database → Backups** (automatisch im Free Plan).
 Oder jederzeit selbst über **Export → Excel herunterladen** in der App.
-
----
-
-Fragen oder Erweiterungen? In der App steckt der komplette Quellcode,
-nichts ist minifiziert.
-=======
-# notrufsystem
-Notrufsystem Test AWO
->>>>>>> deb7a3de421b76145ba231fb2aabe18fe26e492e

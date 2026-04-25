@@ -31,7 +31,7 @@ create table if not exists public.geraete (
   protokoll_id uuid not null references public.protokolle(id) on delete cascade,
   nr integer not null,
   raumname text,
-  anzeige text,
+  zimmer text,
   bett text,
   geraetetyp text,
   sonderfunktion text,
@@ -66,7 +66,7 @@ create table if not exists public.maengel (
   geraet_id bigint references public.geraete(id) on delete set null,
   nr integer,
   raumname text,
-  anzeige text,
+  zimmer text,
   bett text,
   geraetetyp text,
   pruefdatum date,
@@ -83,7 +83,7 @@ create index if not exists maengel_protokoll_idx on public.maengel(protokoll_id)
 -- ---------- KATALOG: Stamm-Ger\u00e4teliste (für Import neuer Protokolle) ----
 create table if not exists public.geraete_katalog (
   nr integer primary key,
-  anzeige text,
+  zimmer text,
   bett text,
   geraetetyp text,
   sonderfunktion text,
@@ -145,8 +145,8 @@ begin
   values (p_krankenhaus, p_station, p_anlage, auth.uid())
   returning id into new_id;
 
-  insert into geraete (protokoll_id, nr, anzeige, bett, geraetetyp, sonderfunktion, zbus_adresse, lon_id, sw_version)
-  select new_id, nr, anzeige, bett, geraetetyp, sonderfunktion, zbus_adresse, lon_id, sw_version
+  insert into geraete (protokoll_id, nr, zimmer, bett, geraetetyp, sonderfunktion, zbus_adresse, lon_id, sw_version)
+  select new_id, nr, zimmer, bett, geraetetyp, sonderfunktion, zbus_adresse, lon_id, sw_version
   from geraete_katalog
   order by nr;
 

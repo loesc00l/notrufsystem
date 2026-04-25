@@ -225,7 +225,7 @@ $('#filter-status').addEventListener('change', (e) => { state.filter.status = e.
 function matchesFilter(g) {
   const { text, status } = state.filter;
   if (text) {
-    const hay = [g.raumname, g.anzeige, g.geraetetyp, g.sonderfunktion,
+    const hay = [g.raumname, g.zimmer, g.geraetetyp, g.sonderfunktion,
                  g.bemerkung, g.geprueft_von, g.bett, g.zbus_adresse, g.lon_id]
                 .filter(Boolean).join(' ').toLowerCase();
     if (!hay.includes(text)) return false;
@@ -237,20 +237,14 @@ function matchesFilter(g) {
   return true;
 }
 
-/* ----- Gruppierung Raum -> Betten -------------------------------- */
-function getRoomKey(anzeige){
-  if (anzeige == null) return null;
-  const s = String(anzeige);
-  const i = s.indexOf(':');
-  return i >= 0 ? s.slice(0, i) : s;
-}
+/* ----- Gruppierung Zimmer -> Betten ------------------------------ */
 function isBedDevice(d){
-  return !!d.anzeige && String(d.anzeige).includes(':');
+  return !!d.bett;
 }
 function buildGroups(devices){
   const map = new Map();
   for (const d of devices) {
-    const key = getRoomKey(d.anzeige) || ('__id_' + d.id);
+    const key = d.zimmer || ('__id_' + d.id);
     if (!map.has(key)) map.set(key, { key, parent: null, children: [] });
     const g = map.get(key);
     if (isBedDevice(d)) g.children.push(d);
@@ -259,7 +253,7 @@ function buildGroups(devices){
   }
   for (const g of map.values()) {
     g.children.sort((a, b) =>
-      String(a.anzeige||'').localeCompare(String(b.anzeige||''), 'de', { numeric: true }));
+      String(a.bett||'').localeCompare(String(b.bett||''), 'de', { numeric: true }));
   }
   return [...map.values()];
 }
@@ -319,10 +313,8 @@ function deviceRow(d, role, opts = {}) {
   tr.dataset.id = d.id;
   tr.classList.add(role + '-row');
 
-  // Zimmer = Anzeige ohne Bett-Suffix (also alles vor dem ":")
-  const zimmer = getRoomKey(d.anzeige) || '';
-  // Bett = der Buchstabe nach ":", ohne den Doppelpunkt
-  const bettClean = (d.bett ? String(d.bett).replace(/^:/,'') : '');
+  const zimmer = d.zimmer || '';
+  const bett   = d.bett   || '';
 
   let zimmerCell = esc(zimmer);
   if (role === 'room' && opts.hasChildren) {
@@ -334,8 +326,7 @@ function deviceRow(d, role, opts = {}) {
     <td>${d.nr}</td>
     <td><input data-f="raumname" value="${esc(d.raumname)}" /></td>
     <td>${zimmerCell}</td>
-    <td>${esc(bettClean)}</td>
-    <td>${esc(d.geraetetyp)}</td>
+    <td>${esc(bett)}</td>
     <td>${chkCell('sichtpruefung', d)}</td>
     <td>${chkCell('befestigung', d)}</td>
     <td>${chkCell('rufausloesung', d)}</td>
@@ -415,7 +406,7 @@ $('#pruefliste-body').addEventListener('click', async (e) => {
     const groups = buildGroups(state.geraete);
     const parentDev = state.geraete.find(d => d.id === id);
     if (parentDev) {
-      const key = getRoomKey(parentDev.anzeige);
+      const key = parentDev.zimmer;
       const grp = groups.find(g => g.key === key);
       if (grp && grp.parent && grp.parent.id === id && grp.children.length) {
         toast('Übernehme "Alle OK" auf ' + grp.children.length + ' Bett(en) ...');
@@ -498,7 +489,7 @@ async function ensureMangelForGeraet(g) {
     if (!existing.mangelbeschreibung || existing.mangelbeschreibung.startsWith('NOK')) {
       const { error } = await sb.from('maengel').update({
         mangelbeschreibung: beschreibung,
-        raumname: g.raumname, anzeige: g.anzeige, bett: g.bett, geraetetyp: g.geraetetyp
+        raumname: g.raumname, zimmer: g.zimmer, bett: g.bett, geraetetyp: g.geraetetyp
       }).eq('id', existing.id);
       if (!error) await loadMaengel();
     }
@@ -510,7 +501,7 @@ async function ensureMangelForGeraet(g) {
     geraet_id: g.id,
     nr: g.nr,
     raumname: g.raumname,
-    anzeige: g.anzeige,
+    zimmer: g.zimmer,
     bett: g.bett,
     geraetetyp: g.geraetetyp,
     pruefdatum: g.geprueft_am || new Date().toISOString().slice(0,10),
@@ -598,7 +589,7 @@ function renderMaengel() {
     tr.innerHTML = `
       <td><input data-f="nr" type="number" value="${m.nr||''}" style="width:60px" /></td>
       <td><input data-f="raumname" value="${esc(m.raumname)}" /></td>
-      <td><input data-f="anzeige"  value="${esc(m.anzeige)}" /></td>
+      <td><input data-f="zimmer"   value="${esc(m.zimmer)}" /></td>
       <td><input data-f="bett"     value="${esc(m.bett)}" style="width:60px" /></td>
       <td><input data-f="geraetetyp" value="${esc(m.geraetetyp)}" /></td>
       <td><input data-f="pruefdatum" type="date" value="${m.pruefdatum||''}" /></td>
@@ -668,14 +659,14 @@ $('#btn-export-xlsx').addEventListener('click', () => {
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deck), 'Deckblatt');
 
-  const pHeader = ['Nr.','Raumname','Zimmer','Bett','Gerätetyp','SW-Version',
+  const pHeader = ['Nr.','Raumname','Zimmer','Bett','SW-Version',
     'Sichtprüfung','Befestigung','Rufauslösung','Opt. Anzeige','Quittierung',
     'Gesamtergebnis','Bemerkung','Geprüft von','Datum'];
   const pRows = state.geraete.map(g => [
     g.nr, g.raumname,
-    getRoomKey(g.anzeige) || '',
-    (g.bett ? String(g.bett).replace(/^:/,'') : ''),
-    g.geraetetyp, g.sw_version,
+    g.zimmer || '',
+    g.bett   || '',
+    g.sw_version,
     g.sichtpruefung, g.befestigung, g.rufausloesung, g.opt_anzeige, g.quittierung,
     g.gesamt_ergebnis, g.bemerkung, g.geprueft_von, g.geprueft_am
   ]);
@@ -684,8 +675,8 @@ $('#btn-export-xlsx').addEventListener('click', () => {
   const mHeader = ['Nr.','Raumname','Zimmer','Bett','Gerätetyp','Prüfdatum','Mangelbeschreibung','Sofortmaßnahme','Priorität','Verantwortlich','Erledigt am'];
   const mRows = state.maengel.map(m => [
     m.nr, m.raumname,
-    getRoomKey(m.anzeige) || '',
-    (m.bett ? String(m.bett).replace(/^:/,'') : ''),
+    m.zimmer || '',
+    m.bett   || '',
     m.geraetetyp, m.pruefdatum, m.mangelbeschreibung, m.sofortmassnahme, m.prioritaet, m.verantwortlich, m.erledigt_am
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([mHeader, ...mRows]), 'Mängelliste');
