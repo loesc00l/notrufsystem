@@ -17,6 +17,30 @@ const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 const $  = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+/* ----- Theme (hell / dunkel) ------------------------------------- */
+const THEME_KEY = 'notruf.theme';
+function setTheme(t){
+  if (t === 'dark' || t === 'light') {
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+    try { localStorage.removeItem(THEME_KEY); } catch (e) {}
+  }
+}
+function currentTheme(){
+  const attr = document.documentElement.getAttribute('data-theme');
+  if (attr === 'dark' || attr === 'light') return attr;
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btn-theme');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    setTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+  });
+});
+
 function toast(msg, ms = 2500) {
   const t = $('#toast');
   t.textContent = msg;
@@ -327,6 +351,11 @@ function deviceRow(d, role, opts = {}) {
   const addBettBtn  = showAddBett
       ? `<button class="btn small mini-action" data-add-bett title="Bett hinzufügen">+ Bett</button>`
       : '';
+  // "🗑 Zimmer" - kompletten Raum (inkl. aller Betten) löschen
+  const showDelZimmer = (role === 'room' || role === 'flat') && !!zimmer;
+  const delZimmerBtn  = showDelZimmer
+      ? `<button class="btn small danger mini-action" data-del-zimmer title="Komplettes Zimmer löschen">🗑 Zimmer</button>`
+      : '';
 
   // Status-Badge für die Karten-Ansicht (mobile)
   const status = d.gesamt_ergebnis || '';
@@ -340,6 +369,7 @@ function deviceRow(d, role, opts = {}) {
     <td data-c="zimmer">
       <span class="cell-zimmer">${zimmerCell}</span>
       ${addBettBtn}
+      ${delZimmerBtn}
       <span class="mobile-status">${statusBadge}</span>
     </td>
     <td data-c="bett">${esc(bett)}</td>
@@ -470,13 +500,47 @@ async function addBettToRoom(parentDev){
 async function deleteGeraet(id){
   const g = state.geraete.find(x => x.id === id);
   if (!g) return;
-  const label = (g.zimmer || '?') + (g.bett ? ' / ' + g.bett : '') + ' (Nr. ' + g.nr + ')';
-  if (!confirm('Eintrag "' + label + '" wirklich löschen?')) return;
-  const { error } = await sb.from('geraete').delete().eq('id', id);
+
+  // Wenn die Zeile ein Zimmer (kein bett) ist und Betten existieren -> alle mit löschen
+  const isRoom = !g.bett;
+  const siblings = isRoom && g.zimmer
+    ? state.geraete.filter(x => x.zimmer === g.zimmer && x.bett && x.id !== g.id)
+    : [];
+
+  let msg;
+  if (siblings.length) {
+    msg = 'Zimmer "' + g.zimmer + '" enthält ' + siblings.length + ' Bett(en).\n'
+        + 'Komplett löschen (Zimmer + alle ' + siblings.length + ' Betten)?';
+  } else {
+    const label = (g.zimmer || '?') + (g.bett ? ' / ' + g.bett : '') + ' (Nr. ' + g.nr + ')';
+    msg = 'Eintrag "' + label + '" wirklich löschen?';
+  }
+  if (!confirm(msg)) return;
+
+  const ids = [id, ...siblings.map(s => s.id)];
+  const { error } = await sb.from('geraete').delete().in('id', ids);
   if (error) { toast('Fehler: ' + error.message); return; }
   await loadGeraete();
   await loadMaengel();
-  toast('Eintrag "' + label + '" gelöscht.');
+  toast(siblings.length
+    ? 'Zimmer "' + g.zimmer + '" mit ' + siblings.length + ' Bett(en) gelöscht.'
+    : 'Eintrag gelöscht.');
+}
+
+async function deleteZimmer(zimmer){
+  if (!zimmer) return;
+  const all = state.geraete.filter(x => x.zimmer === zimmer);
+  if (!all.length) return;
+  const beds = all.filter(x => x.bett).length;
+  const msg = 'Zimmer "' + zimmer + '" mit ' + all.length + ' Eintrag/Einträgen'
+            + (beds ? ' (inkl. ' + beds + ' Bett[en])' : '') + ' wirklich löschen?';
+  if (!confirm(msg)) return;
+  const ids = all.map(x => x.id);
+  const { error } = await sb.from('geraete').delete().in('id', ids);
+  if (error) { toast('Fehler: ' + error.message); return; }
+  await loadGeraete();
+  await loadMaengel();
+  toast('Zimmer "' + zimmer + '" gelöscht.');
 }
 
 // Delegiertes Event-Handling für Prüf-Buttons und Text-Inputs
@@ -502,7 +566,13 @@ $('#pruefliste-body').addEventListener('click', async (e) => {
     if (parentDev) await addBettToRoom(parentDev);
     return;
   }
-  // Eintrag löschen
+  // Komplettes Zimmer löschen (alle Betten mit weg)
+  if (e.target.closest('[data-del-zimmer]')) {
+    const dev = state.geraete.find(d => d.id === id);
+    if (dev && dev.zimmer) await deleteZimmer(dev.zimmer);
+    return;
+  }
+  // Einzelner Eintrag löschen
   if (e.target.closest('[data-del-row]')) {
     await deleteGeraet(id);
     return;
@@ -809,18 +879,24 @@ $('#btn-export-xlsx').addEventListener('click', () => {
     m.bett   || '',
     m.geraetetyp, m.pruefdatum, m.mangelbeschreibung, m.sofortmassnahme, m.prioritaet, m.verantwortlich, m.erledigt_am
   ]);
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([mHeader, ...mRows]), 'Mängelliste');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([mHeader, ...mRows]), 'Mängel');
 
-  const name = 'Pruefprotokoll_' + (d.krankenhaus || 'Notrufsystem').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.xlsx';
-  XLSX.writeFile(wb, name);
-  toast('Excel-Datei heruntergeladen.');
+  const fname = `Pruefprotokoll_${(d.station||'station').replace(/\s+/g,'_')}_${d.pruefdatum_bis||today()}.xlsx`;
+  XLSX.writeFile(wb, fname);
 });
 
+$('#btn-print').addEventListener('click', () => window.print());
+
 /* ------------------------------------------------------------------ *
- *  Start
+ *  Init
  * ------------------------------------------------------------------ */
-(async function init() {
+sb.auth.onAuthStateChange((_e, session) => {
+  state.session = session || null;
+  if (session) showApp(); else showLogin();
+});
+
+(async () => {
   const { data: { session } } = await sb.auth.getSession();
-  if (session) afterLogin(session.user);
-  else show('#view-login');
+  state.session = session || null;
+  if (session) showApp(); else showLogin();
 })();

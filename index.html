@@ -6,6 +6,15 @@
   <meta name="theme-color" content="#1f6feb" />
   <title>Notrufsystem - Prüfprotokoll nach DIN VDE 0834</title>
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Theme so früh wie möglich anwenden (verhindert Flackern beim Laden)
+    (function(){
+      try {
+        var t = localStorage.getItem('notruf.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
 
@@ -42,6 +51,7 @@
     </div>
     <div class="appbar-right">
       <span id="user-email" class="muted"></span>
+      <button class="btn" id="btn-theme" type="button" title="Hell / Dunkel umschalten" aria-label="Theme umschalten"><span class="theme-icon"></span></button>
       <button class="btn" id="btn-logout">Abmelden</button>
     </div>
   </header>
