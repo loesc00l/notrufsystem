@@ -52,7 +52,7 @@ create table if not exists public.geraete (
   gesamt_ergebnis text,           -- OK / NOK / NA
   bemerkung text,
   geprueft_von text,
-  geprueft_am date,
+  geprueft_am timestamptz,        -- Datum + Uhrzeit der Pruefung
 
   unique(protokoll_id, nr)
 );

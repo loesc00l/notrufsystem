@@ -336,7 +336,7 @@ function deviceRow(d, role, opts = {}) {
        <br><button class="btn small" data-allok>Alle OK</button></td>
     <td><input data-f="bemerkung" value="${esc(d.bemerkung)}" /></td>
     <td><input data-f="geprueft_von" value="${esc(d.geprueft_von)}" /></td>
-    <td><input data-f="geprueft_am" type="date" value="${d.geprueft_am||''}" /></td>
+    <td><input data-f="geprueft_am" type="datetime-local" step="60" value="${tsToLocal(d.geprueft_am)}" /></td>
   `;
   return tr;
 }
@@ -378,6 +378,30 @@ function renderPruefliste() {
 
 function esc(v){ if (v==null) return ''; return String(v).replace(/"/g,'&quot;').replace(/</g,'&lt;') }
 
+/* Timestamp-Helfer: ISO <-> datetime-local Inputfeld */
+function tsToLocal(ts){
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  const p = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())
+       +'T'+p(d.getHours())+':'+p(d.getMinutes());
+}
+function tsFromLocal(local){
+  if (!local) return null;
+  const d = new Date(local);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+function tsForDisplay(ts){
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  const p = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())
+       +' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+
 // Delegiertes Event-Handling für Prüf-Buttons und Text-Inputs
 $('#pruefliste-body').addEventListener('click', async (e) => {
   // Aufklapp-/Zuklapp-Toggle für Räume
@@ -397,7 +421,8 @@ $('#pruefliste-body').addEventListener('click', async (e) => {
 
   // "Alle OK" Button - bei einem Zimmer auch alle zugehörigen Betten setzen
   if (e.target.matches('[data-allok]')) {
-    const patch = {};
+    const nowIso = new Date().toISOString();
+    const patch = { geprueft_am: nowIso };
     for (const f of CHECK_FIELDS) patch[f] = 'OK';
     patch.gesamt_ergebnis = 'OK';
     await patchGeraet(id, patch, row);
@@ -435,6 +460,9 @@ $('#pruefliste-body').addEventListener('click', async (e) => {
       else if (vals.every(v => v === 'OK' || v === 'NA')) patch.gesamt_ergebnis = 'OK';
     }
 
+    // Beim Setzen einer Bewertung Datum + Uhrzeit automatisch eintragen
+    if (newVal != null) patch.geprueft_am = new Date().toISOString();
+
     await patchGeraet(id, patch, row);
   }
 });
@@ -445,7 +473,8 @@ $('#pruefliste-body').addEventListener('change', async (e) => {
   const fld = e.target.dataset.f;
   if (!fld) return;
   const id = Number(row.dataset.id);
-  const val = e.target.value || null;
+  let val = e.target.value || null;
+  if (fld === 'geprueft_am') val = tsFromLocal(val);
   await patchGeraet(id, { [fld]: val }, row);
 });
 
@@ -661,14 +690,14 @@ $('#btn-export-xlsx').addEventListener('click', () => {
 
   const pHeader = ['Nr.','Raumname','Zimmer','Bett','SW-Version',
     'Sichtprüfung','Befestigung','Rufauslösung','Opt. Anzeige','Quittierung',
-    'Gesamtergebnis','Bemerkung','Geprüft von','Datum'];
+    'Gesamtergebnis','Bemerkung','Geprüft von','Datum / Zeit'];
   const pRows = state.geraete.map(g => [
     g.nr, g.raumname,
     g.zimmer || '',
     g.bett   || '',
     g.sw_version,
     g.sichtpruefung, g.befestigung, g.rufausloesung, g.opt_anzeige, g.quittierung,
-    g.gesamt_ergebnis, g.bemerkung, g.geprueft_von, g.geprueft_am
+    g.gesamt_ergebnis, g.bemerkung, g.geprueft_von, tsForDisplay(g.geprueft_am)
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([pHeader, ...pRows]), 'Prüfliste');
 
