@@ -471,15 +471,56 @@ function deviceRow(d, role, opts = {}) {
   return tr;
 }
 
+function renderEmptyPruefliste(){
+  const tbody = $('#pruefliste-body');
+  if (!tbody) return;
+  // Anzahl Spalten dynamisch ermitteln, damit die Empty-State-Zeile die ganze Breite einnimmt
+  const cols = $$('.table-pruefliste thead th').length || 13;
+  const tr = document.createElement('tr');
+  tr.className = 'empty-state-row';
+  tr.innerHTML = `
+    <td colspan="${cols}" class="empty-state-cell">
+      <div class="empty-state">
+        <div class="empty-state-title">Keine Geräte in der Prüfliste</div>
+        <p class="empty-state-text">
+          ${state.protokollId
+              ? 'Du kannst die Geräte aus dem Stamm-Katalog (546 Geräte: Zimmer, Betten, Flure …) sofort wiederherstellen oder ein einzelnes Zimmer neu anlegen.'
+              : 'Bitte zuerst oben ein Protokoll anlegen oder auswählen.'}
+        </p>
+        ${state.protokollId
+          ? `<div class="empty-state-actions">
+              <button class="btn primary" type="button" id="btn-empty-import">📥 Geräte aus Katalog importieren</button>
+              <button class="btn"        type="button" id="btn-empty-add-zimmer">+ Einzelnes Zimmer anlegen</button>
+            </div>`
+          : ''}
+      </div>
+    </td>
+  `;
+  tbody.appendChild(tr);
+  // Buttons der Empty-State verdrahten
+  const ie = document.getElementById('btn-empty-import');
+  if (ie) ie.addEventListener('click', reimportFromKatalog);
+  const ae = document.getElementById('btn-empty-add-zimmer');
+  if (ae) ae.addEventListener('click', addZimmer);
+}
+
 function renderPruefliste() {
   const tbody = $('#pruefliste-body');
   tbody.innerHTML = '';
-  const frag = document.createDocumentFragment();
 
+  // Empty-State, wenn keine Geräte vorhanden sind
+  if (!state.geraete || !state.geraete.length) {
+    renderEmptyPruefliste();
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
   const groups = sortGroups(buildGroups(state.geraete));
 
+  let visibleCount = 0;
   for (const g of groups) {
     if (!groupMatches(g)) continue;
+    visibleCount++;
     const hasChildren = g.children.length > 0;
     const collapsed = state.collapsed.has(g.key);
 
@@ -498,6 +539,15 @@ function renderPruefliste() {
     }
   }
   tbody.appendChild(frag);
+
+  // Wenn Filter alles ausblendet, kurzen Hinweis anzeigen
+  if (!visibleCount) {
+    const cols = $$('.table-pruefliste thead th').length || 13;
+    const tr = document.createElement('tr');
+    tr.className = 'empty-state-row';
+    tr.innerHTML = `<td colspan="${cols}" class="empty-state-cell"><div class="empty-state"><div class="empty-state-title">Keine Treffer</div><p class="empty-state-text">Mit dem aktuellen Filter ist nichts sichtbar.</p></div></td>`;
+    tbody.appendChild(tr);
+  }
 
   // Sort-Indikator aktualisieren
   $$('.table-pruefliste thead th[data-sort]').forEach(th => {
@@ -1155,15 +1205,69 @@ $('#btn-export-xlsx').addEventListener('click', () => {
 
 $('#btn-print').addEventListener('click', () => window.print());
 
-// Geräte aus Katalog wiederherstellen (nach versehentlichem Löschen)
-$('#btn-reimport-katalog')?.addEventListener('click', async () => {
+/* Geräte aus Katalog wiederherstellen (nach versehentlichem Löschen).
+   Bevorzugt RPC reimport_geraete_from_katalog (Migration 006).
+   Falls nicht vorhanden -> Fallback: Katalog client-seitig lesen + fehlende einfügen. */
+async function reimportFromKatalog(){
   if (!state.protokollId) { toast('Kein Protokoll ausgewählt'); return; }
-  if (!confirm('Fehlende Geräte (basierend auf Nr. im Katalog) jetzt in dieses Protokoll wieder importieren?\n\nBestehende Einträge bleiben unverändert.')) return;
-  const { data, error } = await sb.rpc('reimport_geraete_from_katalog', { p_protokoll: state.protokollId });
-  if (error) { toast('Fehler: ' + error.message); return; }
+  if (!confirm('Fehlende Geräte aus dem Stamm-Katalog (Zimmer, Betten, Flure …) jetzt in dieses Protokoll importieren?\n\nBestehende Einträge bleiben unverändert.')) return;
+
+  toast('Importiere fehlende Geräte aus dem Katalog ...');
+
+  // --- Versuch 1: RPC (Migration 006) ----------------------------------
+  try {
+    const { data, error } = await sb.rpc('reimport_geraete_from_katalog', { p_protokoll: state.protokollId });
+    if (!error) {
+      await loadGeraete();
+      toast(`${data ?? 0} Geräte aus dem Katalog wiederhergestellt.`);
+      return;
+    }
+    console.warn('reimport_geraete_from_katalog RPC nicht verfügbar, nutze Fallback:', error.message);
+  } catch (err) {
+    console.warn('RPC-Aufruf fehlgeschlagen, nutze Fallback:', err);
+  }
+
+  // --- Fallback: Client-seitiger Reimport -----------------------------
+  const katalog = [];
+  let from = 0, size = 1000;
+  for (;;) {
+    const { data, error } = await sb.from('geraete_katalog')
+      .select('nr, zimmer, bett, geraetetyp, sonderfunktion, zbus_adresse, lon_id, sw_version')
+      .order('nr').range(from, from + size - 1);
+    if (error) { toast('Katalog-Fehler: ' + error.message); return; }
+    katalog.push(...data);
+    if (data.length < size) break;
+    from += size;
+  }
+  if (!katalog.length) { toast('Stamm-Katalog ist leer.'); return; }
+
+  const have = new Set(state.geraete.map(g => g.nr));
+  const missing = katalog.filter(k => !have.has(k.nr));
+  if (!missing.length) { toast('Es fehlen keine Geräte — alles bereits im Protokoll.'); return; }
+
+  const rows = missing.map(k => ({
+    protokoll_id: state.protokollId,
+    nr: k.nr,
+    zimmer: k.zimmer,
+    bett: k.bett,
+    geraetetyp: k.geraetetyp,
+    sonderfunktion: k.sonderfunktion,
+    zbus_adresse: k.zbus_adresse,
+    lon_id: k.lon_id,
+    sw_version: k.sw_version
+  }));
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const slice = rows.slice(i, i + 500);
+    const { error } = await sb.from('geraete').insert(slice);
+    if (error) { toast('Insert-Fehler: ' + error.message); break; }
+    inserted += slice.length;
+  }
   await loadGeraete();
-  toast(`${data ?? 0} Geräte aus dem Katalog wiederhergestellt.`);
-});
+  toast(`${inserted} Geräte aus dem Katalog wiederhergestellt.`);
+}
+
+$('#btn-reimport-katalog')?.addEventListener('click', reimportFromKatalog);
 
 /* ------------------------------------------------------------------ *
  *  Init
