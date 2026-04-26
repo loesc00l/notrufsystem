@@ -60,6 +60,7 @@
     <button class="tab active" data-tab="deckblatt">Deckblatt</button>
     <button class="tab" data-tab="pruefliste">Prüfliste <span id="count-geraete" class="pill"></span></button>
     <button class="tab" data-tab="maengel">Mängelliste <span id="count-maengel" class="pill"></span></button>
+    <button class="tab" data-tab="historie">Historie <span id="count-historie" class="pill"></span></button>
     <button class="tab" data-tab="export">Export</button>
   </nav>
 
@@ -104,6 +105,7 @@
         <button id="btn-expand-all"   class="btn small" type="button" title="Alle Räume aufklappen">⊞ Alle</button>
         <button id="btn-collapse-all" class="btn small" type="button" title="Alle Räume zuklappen">⊟ Alle</button>
         <button id="btn-add-zimmer"   class="btn small primary" type="button" title="Neues Zimmer anlegen">+ Zimmer</button>
+        <button id="btn-reset-tests"  class="btn small danger"  type="button" title="Alte Tests archivieren und Prüfliste leeren">🔄 Neue Prüfung</button>
       </div>
       <div class="table-wrap">
         <table class="table table-pruefliste">
@@ -160,6 +162,39 @@
         </table>
       </div>
       <p class="muted small">NOK-Geräte aus der Prüfliste werden automatisch als Mangel angelegt.</p>
+    </div>
+  </section>
+
+  <!-- ===== HISTORIE ===== -->
+  <section class="tab-panel hidden" data-panel="historie">
+    <div class="card">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <h2>Prüf-Historie</h2>
+        <select id="historie-batch" title="Prüfungsrunde wählen"></select>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Nr.</th>
+              <th>Raumname</th>
+              <th>Zimmer</th>
+              <th>Bett</th>
+              <th>Sicht</th>
+              <th>Bef.</th>
+              <th>Ruf</th>
+              <th>Opt.</th>
+              <th>Quitt.</th>
+              <th>Gesamt</th>
+              <th>Bemerkung</th>
+              <th>Prüfer</th>
+              <th>Datum / Zeit</th>
+            </tr>
+          </thead>
+          <tbody id="historie-body"></tbody>
+        </table>
+      </div>
+      <p class="muted small">Archivierte Prüfungen aus früheren Runden. Über "🔄 Neue Prüfung" in der Prüfliste werden die aktuellen Daten hier abgelegt.</p>
     </div>
   </section>
 

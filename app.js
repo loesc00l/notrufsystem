@@ -60,6 +60,8 @@ const state = {
   deckblatt: null,
   geraete: [],
   maengel: [],
+  historie: [],                        // archivierte Prüfungen (geraete_history)
+  historieBatch: '',                   // gewählte Prüfungsrunde (batch_id)
   filter: { text: '', status: '' },
   sort:   { col: 'nr', dir: 'asc' },   // Sortierzustand
   collapsed: new Set(),                // welche Räume sind zugeklappt
@@ -119,6 +121,7 @@ $$('.tab').forEach(btn => btn.addEventListener('click', () => {
   const t = btn.dataset.tab;
   $$('.tab-panel').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== t));
   if (t === 'export') loadArchive();
+  if (t === 'historie') loadHistorie();
 }));
 
 /* ------------------------------------------------------------------ *
@@ -543,6 +546,176 @@ async function deleteZimmer(zimmer){
   toast('Zimmer "' + zimmer + '" gelöscht.');
 }
 
+/* ------------------------------------------------------------------ *
+ *  Neue Prüfung starten — alte Tests archivieren + Daten zurücksetzen
+ * ------------------------------------------------------------------ */
+const RESET_FIELDS = [
+  'sichtpruefung','befestigung','rufausloesung','akust_signal',
+  'opt_anzeige','weiterleitung','quittierung','notstrom',
+  'gesamt_ergebnis','bemerkung','geprueft_von','geprueft_am'
+];
+
+function devHasTestData(g){
+  if (g.gesamt_ergebnis) return true;
+  if (g.geprueft_am)     return true;
+  if (g.bemerkung && g.bemerkung.trim()) return true;
+  if (g.geprueft_von && g.geprueft_von.trim()) return true;
+  for (const f of RESET_FIELDS) {
+    if (f === 'gesamt_ergebnis' || f === 'bemerkung' || f === 'geprueft_von' || f === 'geprueft_am') continue;
+    if (g[f]) return true;
+  }
+  return false;
+}
+
+async function archiveAndResetTests(){
+  if (!state.protokollId) { toast('Kein Protokoll ausgewählt'); return; }
+  const tested = state.geraete.filter(devHasTestData);
+  if (!tested.length) {
+    if (!confirm('Es liegen keine Testdaten vor. Trotzdem zurücksetzen?')) return;
+  }
+  const msg = tested.length
+    ? `${tested.length} geprüfte Geräte werden in die Historie verschoben und die Prüfliste wird komplett geleert (alle Prüfkriterien, Bemerkungen, Prüfer, Zeitstempel auf leer).\n\nFortfahren?`
+    : 'Prüfliste wird zurückgesetzt. Fortfahren?';
+  if (!confirm(msg)) return;
+
+  // batch_id clientseitig erzeugen, damit alle Zeilen einer Runde verknüpft sind
+  const batchId = (crypto && crypto.randomUUID) ? crypto.randomUUID()
+                : 'b-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+
+  // 1) Snapshot in geraete_history kopieren
+  if (tested.length) {
+    const rows = tested.map(g => ({
+      protokoll_id: state.protokollId,
+      geraet_id:    g.id,
+      batch_id:     batchId,
+      nr:           g.nr,
+      raumname:     g.raumname,
+      zimmer:       g.zimmer,
+      bett:         g.bett,
+      geraetetyp:   g.geraetetyp,
+      sichtpruefung: g.sichtpruefung,
+      befestigung:   g.befestigung,
+      rufausloesung: g.rufausloesung,
+      akust_signal:  g.akust_signal,
+      opt_anzeige:   g.opt_anzeige,
+      weiterleitung: g.weiterleitung,
+      quittierung:   g.quittierung,
+      notstrom:      g.notstrom,
+      gesamt_ergebnis: g.gesamt_ergebnis,
+      bemerkung:     g.bemerkung,
+      geprueft_von:  g.geprueft_von,
+      geprueft_am:   g.geprueft_am
+    }));
+    const { error: histErr } = await sb.from('geraete_history').insert(rows);
+    if (histErr) { toast('Historie-Fehler: ' + histErr.message); return; }
+  }
+
+  // 2) Felder in geraete leeren (nur für das aktive Protokoll)
+  const patch = {};
+  for (const f of RESET_FIELDS) patch[f] = null;
+  const { error: updErr } = await sb
+    .from('geraete')
+    .update(patch)
+    .eq('protokoll_id', state.protokollId);
+  if (updErr) { toast('Reset-Fehler: ' + updErr.message); return; }
+
+  // 3) Mängel der aktuellen Runde nicht löschen — sie bleiben dokumentarisch erhalten
+
+  await loadGeraete();
+  await loadMaengel();
+  toast(tested.length
+    ? `${tested.length} Tests archiviert, Prüfliste zurückgesetzt.`
+    : 'Prüfliste zurückgesetzt.');
+}
+
+/* ------------------------------------------------------------------ *
+ *  Historie laden + rendern
+ * ------------------------------------------------------------------ */
+async function loadHistorie(){
+  if (!state.protokollId) { state.historie = []; renderHistorie(); return; }
+  const { data, error } = await sb
+    .from('geraete_history')
+    .select('*')
+    .eq('protokoll_id', state.protokollId)
+    .order('archived_at', { ascending: false })
+    .order('nr', { ascending: true });
+  if (error) { toast('Historie: ' + error.message); return; }
+  state.historie = data || [];
+  // Standardmäßig die jüngste Runde anzeigen
+  if (state.historie.length && !state.historie.find(h => h.batch_id === state.historieBatch)) {
+    state.historieBatch = state.historie[0].batch_id;
+  }
+  renderHistorie();
+}
+
+function renderHistorie(){
+  const tbody = $('#historie-body');
+  const sel   = $('#historie-batch');
+  if (!tbody || !sel) return;
+
+  // Einzigartige Batches (jüngste zuerst)
+  const batches = [];
+  const seen = new Set();
+  for (const h of state.historie) {
+    if (seen.has(h.batch_id)) continue;
+    seen.add(h.batch_id);
+    batches.push({
+      id: h.batch_id,
+      archived_at: h.archived_at,
+      count: state.historie.filter(x => x.batch_id === h.batch_id).length
+    });
+  }
+
+  // Dropdown füllen
+  sel.innerHTML = '';
+  if (!batches.length) {
+    sel.innerHTML = '<option value="">(keine archivierten Prüfungen)</option>';
+  } else {
+    for (const b of batches) {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = `${tsForDisplay(b.archived_at)} — ${b.count} Geräte`;
+      if (b.id === state.historieBatch) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  }
+
+  // Tabelle füllen
+  const rows = state.historie.filter(h => h.batch_id === state.historieBatch);
+  tbody.innerHTML = '';
+  for (const h of rows) {
+    const tr = document.createElement('tr');
+    const cellChk = (v) => v
+      ? `<span class="badge ${v==='OK'?'ok':v==='NOK'?'nok':'na'}">${v}</span>`
+      : '';
+    tr.innerHTML = `
+      <td>${h.nr ?? ''}</td>
+      <td>${esc(h.raumname)}</td>
+      <td>${esc(h.zimmer)}</td>
+      <td>${esc(h.bett)}</td>
+      <td>${cellChk(h.sichtpruefung)}</td>
+      <td>${cellChk(h.befestigung)}</td>
+      <td>${cellChk(h.rufausloesung)}</td>
+      <td>${cellChk(h.opt_anzeige)}</td>
+      <td>${cellChk(h.quittierung)}</td>
+      <td>${cellChk(h.gesamt_ergebnis)}</td>
+      <td>${esc(h.bemerkung)}</td>
+      <td>${esc(h.geprueft_von)}</td>
+      <td>${tsForDisplay(h.geprueft_am)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  $('#count-historie').textContent = batches.length || '';
+}
+
+// Reset-Button und Batch-Wechsel verdrahten
+$('#btn-reset-tests').addEventListener('click', archiveAndResetTests);
+$('#historie-batch').addEventListener('change', (e) => {
+  state.historieBatch = e.target.value;
+  renderHistorie();
+});
+
 // Delegiertes Event-Handling für Prüf-Buttons und Text-Inputs
 $('#pruefliste-body').addEventListener('click', async (e) => {
   // Aufklapp-/Zuklapp-Toggle für Räume
@@ -752,7 +925,7 @@ async function loadArchive() {
     item.innerHTML = `
       <div class="meta">
         <strong>${esc(title)}</strong>
-        <small>${esc(dates)} ${dates ? '· ' : ''}archiviert: ${esc(arch)}</small>
+        <small>${esc(dates)} - archiviert ${esc(arch)}</small>
       </div>
       <button class="btn small" data-restore="${p.id}">Wieder auswerfen</button>
     `;
@@ -760,102 +933,117 @@ async function loadArchive() {
   }
 }
 
-document.addEventListener('click', async (e) => {
+$('#archive-list').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-restore]');
   if (!btn) return;
-  const pid = btn.dataset.restore;
-  if (!confirm('Protokoll wieder aktivieren? Es erscheint dann wieder im Dropdown.')) return;
-  const { error } = await sb.from('protokolle').update({ archived_at: null }).eq('id', pid);
-  if (error) { toast(error.message); return; }
-  toast('Protokoll wieder aktiviert.');
+  const id = btn.dataset.restore;
+  if (!confirm('Dieses Protokoll wieder aktivieren?')) return;
+  const { error } = await sb.from('protokolle').update({ archived_at: null }).eq('id', id);
+  if (error) { toast('Fehler: ' + error.message); return; }
+  toast('Protokoll wieder aktiv.');
   await loadProtokolle();
   await loadArchive();
 });
 
-$('#btn-add-mangel').addEventListener('click', async () => {
-  const { error } = await sb.from('maengel').insert({
-    protokoll_id: state.protokollId, mangelbeschreibung: '', prioritaet: 'M'
+/* ------------------------------------------------------------------ *
+ *  Prüfliste-Suche / Filter / Aufklappen
+ * ------------------------------------------------------------------ */
+$('#filter-input').addEventListener('input', (e) => {
+  state.filter.text = e.target.value.toLowerCase();
+  renderPruefliste();
+});
+$('#filter-status').addEventListener('change', (e) => {
+  state.filter.status = e.target.value;
+  renderPruefliste();
+});
+$('#btn-expand-all').addEventListener('click', () => {
+  state.collapsed.clear();
+  renderPruefliste();
+});
+$('#btn-collapse-all').addEventListener('click', () => {
+  const groups = buildGroups(state.geraete);
+  for (const g of groups) if (g.children.length) state.collapsed.add(g.key);
+  renderPruefliste();
+});
+
+/* ------------------------------------------------------------------ *
+ *  Sortierbare Tabellen-Header
+ * ------------------------------------------------------------------ */
+$$('.table-pruefliste thead th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (state.sort.col === col) {
+      state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sort.col = col;
+      state.sort.dir = 'asc';
+    }
+    $$('.table-pruefliste thead th').forEach(t => t.classList.remove('sorted-asc','sorted-desc'));
+    th.classList.add(state.sort.dir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+    renderPruefliste();
   });
+});
+
+/* ------------------------------------------------------------------ *
+ *  Mängel manuell erfassen / löschen / editieren
+ * ------------------------------------------------------------------ */
+$('#btn-add-mangel').addEventListener('click', async () => {
+  if (!state.protokollId) { toast('Erst Protokoll wählen.'); return; }
+  const beschreibung = prompt('Mangelbeschreibung:');
+  if (!beschreibung) return;
+  const m = {
+    protokoll_id: state.protokollId,
+    pruefdatum: today(),
+    mangelbeschreibung: beschreibung,
+    prioritaet: 'M'
+  };
+  const { error } = await sb.from('maengel').insert(m);
   if (error) { toast('Fehler: ' + error.message); return; }
   await loadMaengel();
 });
 
-function renderMaengel() {
-  const tbody = $('#maengel-body');
-  tbody.innerHTML = '';
-  for (const m of state.maengel) {
-    const tr = document.createElement('tr');
-    tr.dataset.id = m.id;
-    tr.innerHTML = `
-      <td><input data-f="nr" type="number" value="${m.nr||''}" style="width:60px" /></td>
-      <td><input data-f="raumname" value="${esc(m.raumname)}" /></td>
-      <td><input data-f="zimmer"   value="${esc(m.zimmer)}" /></td>
-      <td><input data-f="bett"     value="${esc(m.bett)}" style="width:60px" /></td>
-      <td><input data-f="geraetetyp" value="${esc(m.geraetetyp)}" /></td>
-      <td><input data-f="pruefdatum" type="date" value="${m.pruefdatum||''}" /></td>
-      <td><input data-f="mangelbeschreibung" value="${esc(m.mangelbeschreibung)}" /></td>
-      <td><input data-f="sofortmassnahme" value="${esc(m.sofortmassnahme)}" /></td>
-      <td>
-        <select data-f="prioritaet">
-          <option value="H" ${m.prioritaet==='H'?'selected':''}>H</option>
-          <option value="M" ${m.prioritaet==='M'?'selected':''}>M</option>
-          <option value="N" ${m.prioritaet==='N'?'selected':''}>N</option>
-        </select>
-      </td>
-      <td><input data-f="verantwortlich" value="${esc(m.verantwortlich)}" /></td>
-      <td><input data-f="erledigt_am" type="date" value="${m.erledigt_am||''}" /></td>
-      <td><button class="btn small danger" data-del>Löschen</button></td>
-    `;
-    tbody.appendChild(tr);
-  }
-}
-
-$('#maengel-body').addEventListener('change', async (e) => {
-  const row = e.target.closest('tr[data-id]');
-  if (!row) return;
-  const id = Number(row.dataset.id);
-  const fld = e.target.dataset.f;
-  if (!fld) return;
-  const val = e.target.value || null;
-  const { error } = await sb.from('maengel').update({ [fld]: val }).eq('id', id);
+$('#maengel-body').addEventListener('input', async (e) => {
+  const inp = e.target.closest('input,select,textarea');
+  if (!inp) return;
+  const tr = inp.closest('tr[data-id]'); if (!tr) return;
+  const id = Number(tr.dataset.id);
+  const field = inp.dataset.f; if (!field) return;
+  const val = inp.value || null;
+  const { error } = await sb.from('maengel').update({ [field]: val }).eq('id', id);
   if (error) toast('Fehler: ' + error.message);
-  const idx = state.maengel.findIndex(m => m.id === id);
-  if (idx >= 0) state.maengel[idx][fld] = val;
 });
 
 $('#maengel-body').addEventListener('click', async (e) => {
-  if (!e.target.matches('[data-del]')) return;
-  const row = e.target.closest('tr[data-id]');
-  const id = Number(row.dataset.id);
+  const btn = e.target.closest('[data-del-mangel]');
+  if (!btn) return;
+  const id = Number(btn.dataset.delMangel);
   if (!confirm('Mangel wirklich löschen?')) return;
   const { error } = await sb.from('maengel').delete().eq('id', id);
-  if (error) { toast(error.message); return; }
+  if (error) { toast('Fehler: ' + error.message); return; }
   await loadMaengel();
 });
 
 /* ------------------------------------------------------------------ *
- *  Export: XLSX und Drucken
+ *  Excel-Export
  * ------------------------------------------------------------------ */
-$('#btn-print').addEventListener('click', () => window.print());
-
 $('#btn-export-xlsx').addEventListener('click', () => {
+  if (!state.deckblatt) { toast('Erst Protokoll wählen.'); return; }
   const wb = XLSX.utils.book_new();
-
-  const d = state.deckblatt || {};
+  const d = state.deckblatt;
   const deck = [
-    ['Prüfprotokoll Notrufsystem - DIN VDE 0834'],
+    ['Prüfprotokoll Notrufsystem nach DIN VDE 0834'],
     [],
-    ['Krankenhaus / Einrichtung', d.krankenhaus || ''],
-    ['Station / Bereich',         d.station || ''],
-    ['Anlage / System',           d.anlage || ''],
-    ['Verantwortl. Techniker',    d.verantwortlicher || ''],
-    ['Prüfdatum von',             d.pruefdatum_von || ''],
-    ['Prüfdatum bis',             d.pruefdatum_bis || ''],
-    ['Prüfer',                    d.pruefer || ''],
-    ['Qualifikation / Firma',     d.qualifikation || ''],
-    ['Prüfauftrag-Nr.',           d.auftrag_nr || ''],
-    ['Nächste Prüfung fällig',    d.naechste_pruefung || ''],
-    ['Bemerkung',                 d.bemerkung || ''],
+    ['Krankenhaus / Einrichtung',  d.krankenhaus || ''],
+    ['Station / Bereich',          d.station || ''],
+    ['Anlage / System',            d.anlage || ''],
+    ['Verantwortl. Techniker',     d.verantwortlicher || ''],
+    ['Prüfdatum von',              d.pruefdatum_von || ''],
+    ['Prüfdatum bis',              d.pruefdatum_bis || ''],
+    ['Prüfer',                     d.pruefer || ''],
+    ['Qualifikation / Firma',      d.qualifikation || ''],
+    ['Prüfauftrag-Nr.',            d.auftrag_nr || ''],
+    ['Nächste Prüfung fällig',     d.naechste_pruefung || ''],
+    ['Bemerkung',                  d.bemerkung || ''],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deck), 'Deckblatt');
 
@@ -863,10 +1051,7 @@ $('#btn-export-xlsx').addEventListener('click', () => {
     'Sichtprüfung','Befestigung','Rufauslösung','Opt. Anzeige','Quittierung',
     'Gesamtergebnis','Bemerkung','Geprüft von','Datum / Zeit'];
   const pRows = state.geraete.map(g => [
-    g.nr, g.raumname,
-    g.zimmer || '',
-    g.bett   || '',
-    g.sw_version,
+    g.nr, g.raumname, g.zimmer || '', g.bett || '', g.sw_version,
     g.sichtpruefung, g.befestigung, g.rufausloesung, g.opt_anzeige, g.quittierung,
     g.gesamt_ergebnis, g.bemerkung, g.geprueft_von, tsForDisplay(g.geprueft_am)
   ]);
@@ -874,12 +1059,21 @@ $('#btn-export-xlsx').addEventListener('click', () => {
 
   const mHeader = ['Nr.','Raumname','Zimmer','Bett','Gerätetyp','Prüfdatum','Mangelbeschreibung','Sofortmaßnahme','Priorität','Verantwortlich','Erledigt am'];
   const mRows = state.maengel.map(m => [
-    m.nr, m.raumname,
-    m.zimmer || '',
-    m.bett   || '',
+    m.nr, m.raumname, m.zimmer || '', m.bett || '',
     m.geraetetyp, m.pruefdatum, m.mangelbeschreibung, m.sofortmassnahme, m.prioritaet, m.verantwortlich, m.erledigt_am
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([mHeader, ...mRows]), 'Mängel');
+
+  // Optional: Historie auch als Sheet (alle Runden)
+  if (state.historie && state.historie.length) {
+    const hHeader = ['Archiviert am','Nr.','Raumname','Zimmer','Bett','Sicht','Bef.','Ruf','Opt.','Quitt.','Gesamt','Bemerkung','Prüfer','Datum / Zeit'];
+    const hRows = state.historie.map(h => [
+      tsForDisplay(h.archived_at), h.nr, h.raumname, h.zimmer || '', h.bett || '',
+      h.sichtpruefung, h.befestigung, h.rufausloesung, h.opt_anzeige, h.quittierung,
+      h.gesamt_ergebnis, h.bemerkung, h.geprueft_von, tsForDisplay(h.geprueft_am)
+    ]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([hHeader, ...hRows]), 'Historie');
+  }
 
   const fname = `Pruefprotokoll_${(d.station||'station').replace(/\s+/g,'_')}_${d.pruefdatum_bis||today()}.xlsx`;
   XLSX.writeFile(wb, fname);
