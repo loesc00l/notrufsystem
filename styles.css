@@ -303,11 +303,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline
   body{font-size:15px}
 }
 
-/* Theme-Toggle-Button */
-#btn-theme{padding:.4rem .55rem;line-height:1;font-size:1rem;min-width:2.4rem}
-#btn-theme .theme-icon{font-size:1.1rem}
-[data-theme="dark"] #btn-theme .theme-icon::before{content:"🌞"}
-:root:not([data-theme="dark"]) #btn-theme .theme-icon::before{content:"🌙"}
+/* Theme-Toggle-Button (Inhalt setzt JS in app.js) */
+#btn-theme{padding:.4rem .6rem;line-height:1;font-size:1.1rem;min-width:2.4rem;cursor:pointer}
 
 /* ========== Toast ========== */
 .toast{

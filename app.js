@@ -19,6 +19,20 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 /* ----- Theme (hell / dunkel) ------------------------------------- */
 const THEME_KEY = 'notruf.theme';
+function currentTheme(){
+  const attr = document.documentElement.getAttribute('data-theme');
+  if (attr === 'dark' || attr === 'light') return attr;
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function refreshThemeButton(){
+  const btn = document.getElementById('btn-theme');
+  if (!btn) return;
+  const dark = currentTheme() === 'dark';
+  // Direkt Symbol + Tooltip aktualisieren - unabhängig von CSS-Pseudo-Elementen
+  btn.textContent = dark ? '🌞' : '🌙';
+  btn.title = dark ? 'Auf Hell umschalten' : 'Auf Dunkel umschalten';
+  btn.setAttribute('aria-label', btn.title);
+}
 function setTheme(t){
   if (t === 'dark' || t === 'light') {
     document.documentElement.setAttribute('data-theme', t);
@@ -27,18 +41,24 @@ function setTheme(t){
     document.documentElement.removeAttribute('data-theme');
     try { localStorage.removeItem(THEME_KEY); } catch (e) {}
   }
+  refreshThemeButton();
 }
-function currentTheme(){
-  const attr = document.documentElement.getAttribute('data-theme');
-  if (attr === 'dark' || attr === 'light') return attr;
-  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-document.addEventListener('DOMContentLoaded', () => {
+function bindThemeButton(){
   const btn = document.getElementById('btn-theme');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
+  if (!btn || btn.dataset.bound === '1') return;
+  btn.dataset.bound = '1';
+  refreshThemeButton();
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
     setTheme(currentTheme() === 'dark' ? 'light' : 'dark');
   });
+}
+// Direkt + DCL + nach Login - egal wann der Button im DOM ist, er wird verdrahtet
+bindThemeButton();
+document.addEventListener('DOMContentLoaded', bindThemeButton);
+// Wenn der Nutzer das System-Theme ändert und keine manuelle Wahl hat
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+  if (!document.documentElement.getAttribute('data-theme')) refreshThemeButton();
 });
 
 function toast(msg, ms = 2500) {
@@ -109,6 +129,7 @@ async function afterLogin(user) {
   state.user = user;
   $('#user-email').textContent = user.email;
   show('#view-app');
+  bindThemeButton();
   await loadProtokolle();
 }
 
