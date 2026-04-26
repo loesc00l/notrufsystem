@@ -220,6 +220,21 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline
 .empty-state-actions{
   display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;margin-top:.3rem;
 }
+.empty-state-subtitle{
+  margin-top:1.2rem;font-weight:600;color:var(--ink);
+}
+.empty-state-archive{
+  width:100%;max-width:46rem;margin:.4rem auto 0;text-align:left;
+}
+.empty-state-archive-list{
+  display:flex;flex-direction:column;gap:.4rem;margin-top:.5rem;
+}
+.empty-state-archive-item{
+  display:flex;align-items:center;justify-content:space-between;gap:.6rem;
+  padding:.5rem .75rem;border:1px solid var(--border);border-radius:6px;
+  background:var(--card);
+}
+.empty-state-archive-item small{display:block;color:var(--muted);font-size:.85rem;}
 
 /* Prüf-Zellen als Klick-Buttons */
 .chk{

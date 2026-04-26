@@ -471,37 +471,97 @@ function deviceRow(d, role, opts = {}) {
   return tr;
 }
 
-function renderEmptyPruefliste(){
+async function renderEmptyPruefliste(){
   const tbody = $('#pruefliste-body');
   if (!tbody) return;
   // Anzahl Spalten dynamisch ermitteln, damit die Empty-State-Zeile die ganze Breite einnimmt
   const cols = $$('.table-pruefliste thead th').length || 13;
+
+  if (state.protokollId) {
+    // Aktives Protokoll vorhanden, aber Geräte fehlen
+    const tr = document.createElement('tr');
+    tr.className = 'empty-state-row';
+    tr.innerHTML = `
+      <td colspan="${cols}" class="empty-state-cell">
+        <div class="empty-state">
+          <div class="empty-state-title">Keine Geräte in der Prüfliste</div>
+          <p class="empty-state-text">
+            Du kannst die Geräte aus dem Stamm-Katalog (546 Geräte: Zimmer, Betten, Flure …) sofort wiederherstellen
+            oder ein einzelnes Zimmer neu anlegen.
+          </p>
+          <div class="empty-state-actions">
+            <button class="btn primary" type="button" id="btn-empty-import">📥 Geräte aus Katalog importieren</button>
+            <button class="btn"         type="button" id="btn-empty-add-zimmer">+ Einzelnes Zimmer anlegen</button>
+          </div>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+    document.getElementById('btn-empty-import')?.addEventListener('click', reimportFromKatalog);
+    document.getElementById('btn-empty-add-zimmer')?.addEventListener('click', addZimmer);
+    return;
+  }
+
+  // Kein aktives Protokoll -> archivierte anzeigen + "Neu mit 546" anbieten
+  const { data: archived } = await sb
+    .from('protokolle')
+    .select('id, krankenhaus, station, pruefdatum_von, pruefdatum_bis, archived_at')
+    .not('archived_at', 'is', null)
+    .order('archived_at', { ascending: false });
+
+  const archivedHtml = (archived && archived.length)
+    ? `<div class="empty-state-archive">
+         <div class="empty-state-subtitle">Archivierte Protokolle (Daten sind erhalten)</div>
+         <div class="empty-state-archive-list">
+           ${archived.map(p => {
+             const title = [p.krankenhaus || '(ohne Name)', p.station].filter(Boolean).join(' — ');
+             const dates = [p.pruefdatum_von, p.pruefdatum_bis].filter(Boolean).join(' bis ');
+             const arch  = new Date(p.archived_at).toLocaleString('de-DE');
+             return `<div class="empty-state-archive-item">
+                       <div>
+                         <strong>${esc(title)}</strong>
+                         <small>${esc(dates)}${dates ? ' — ' : ''}archiviert ${esc(arch)}</small>
+                       </div>
+                       <button class="btn small primary" type="button" data-restore-empty="${p.id}">Wieder aktivieren</button>
+                     </div>`;
+           }).join('')}
+         </div>
+       </div>`
+    : `<p class="empty-state-text">Im Archiv sind ebenfalls keine Protokolle.</p>`;
+
   const tr = document.createElement('tr');
   tr.className = 'empty-state-row';
   tr.innerHTML = `
     <td colspan="${cols}" class="empty-state-cell">
       <div class="empty-state">
-        <div class="empty-state-title">Keine Geräte in der Prüfliste</div>
+        <div class="empty-state-title">Kein aktives Protokoll</div>
         <p class="empty-state-text">
-          ${state.protokollId
-              ? 'Du kannst die Geräte aus dem Stamm-Katalog (546 Geräte: Zimmer, Betten, Flure …) sofort wiederherstellen oder ein einzelnes Zimmer neu anlegen.'
-              : 'Bitte zuerst oben ein Protokoll anlegen oder auswählen.'}
+          Du kannst ein neues Protokoll anlegen (alle 546 Geräte werden automatisch importiert)
+          oder ein archiviertes Protokoll wieder aktivieren.
         </p>
-        ${state.protokollId
-          ? `<div class="empty-state-actions">
-              <button class="btn primary" type="button" id="btn-empty-import">📥 Geräte aus Katalog importieren</button>
-              <button class="btn"        type="button" id="btn-empty-add-zimmer">+ Einzelnes Zimmer anlegen</button>
-            </div>`
-          : ''}
+        <div class="empty-state-actions">
+          <button class="btn primary" type="button" id="btn-empty-new">+ Neues Protokoll mit 546 Geräten</button>
+        </div>
+        ${archivedHtml}
       </div>
     </td>
   `;
   tbody.appendChild(tr);
-  // Buttons der Empty-State verdrahten
-  const ie = document.getElementById('btn-empty-import');
-  if (ie) ie.addEventListener('click', reimportFromKatalog);
-  const ae = document.getElementById('btn-empty-add-zimmer');
-  if (ae) ae.addEventListener('click', addZimmer);
+
+  document.getElementById('btn-empty-new')?.addEventListener('click', createProtokollPrompt);
+
+  // "Wieder aktivieren" Buttons direkt verdrahten
+  tbody.querySelectorAll('[data-restore-empty]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.restoreEmpty;
+      if (!confirm('Dieses Protokoll wieder aktivieren? Die geprüften Geräte und Mängel bleiben erhalten.')) return;
+      const { error } = await sb.from('protokolle').update({ archived_at: null }).eq('id', id);
+      if (error) { toast('Fehler: ' + error.message); return; }
+      toast('Protokoll wieder aktiv.');
+      await loadProtokolle();
+      await loadArchive();
+    });
+  });
 }
 
 function renderPruefliste() {
