@@ -177,10 +177,16 @@ $('#btn-logout').addEventListener('click', async () => {
 
 async function afterLogin(user) {
   state.user = user;
-  $('#user-email').textContent = user.email;
+  const emailEl = document.getElementById('user-email');
+  if (emailEl) emailEl.textContent = user?.email || '';
   show('#view-app');
   bindThemeButton();
-  await loadProtokolle();
+  try {
+    await loadProtokolle();
+  } catch (err) {
+    console.error('loadProtokolle failed:', err);
+    toast('Fehler beim Laden: ' + (err.message || err));
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -1154,13 +1160,42 @@ $('#btn-print').addEventListener('click', () => window.print());
 /* ------------------------------------------------------------------ *
  *  Init
  * ------------------------------------------------------------------ */
-sb.auth.onAuthStateChange((_e, session) => {
-  state.session = session || null;
-  if (session) showApp(); else showLogin();
+function showApp(){
+  show('#view-app');
+  bindThemeButton();
+}
+function showLogin(){
+  show('#view-login');
+}
+
+async function bootSession(session){
+  if (!session) { showLogin(); return; }
+  state.user = session.user;
+  state.session = session;
+  try {
+    const emailEl = document.getElementById('user-email');
+    if (emailEl) emailEl.textContent = session.user && session.user.email || '';
+    showApp();
+    await loadProtokolle();
+  } catch (err) {
+    console.error('Init failed:', err);
+    if (typeof loginMsg === 'function') loginMsg('Init-Fehler: ' + (err.message || err));
+  }
+}
+
+sb.auth.onAuthStateChange((evt, session) => {
+  if (evt === 'SIGNED_OUT') { showLogin(); return; }
+  if (session && (!state.user || state.user.id !== session.user.id)) {
+    bootSession(session);
+  }
 });
 
 (async () => {
-  const { data: { session } } = await sb.auth.getSession();
-  state.session = session || null;
-  if (session) showApp(); else showLogin();
+  try {
+    const { data } = await sb.auth.getSession();
+    await bootSession(data.session || null);
+  } catch (err) {
+    console.error('getSession failed:', err);
+    showLogin();
+  }
 })();
