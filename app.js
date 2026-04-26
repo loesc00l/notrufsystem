@@ -431,11 +431,9 @@ function deviceRow(d, role, opts = {}) {
   const addBettBtn  = showAddBett
       ? `<button class="btn small mini-action" data-add-bett title="Bett hinzufügen">+ Bett</button>`
       : '';
-  // "🗑 Zimmer" - kompletten Raum (inkl. aller Betten) löschen
-  const showDelZimmer = (role === 'room' || role === 'flat') && !!zimmer;
-  const delZimmerBtn  = showDelZimmer
-      ? `<button class="btn small danger mini-action" data-del-zimmer title="Komplettes Zimmer löschen">🗑 Zimmer</button>`
-      : '';
+  // Per-Zeile-Zimmer-Lösch-Button bewusst entfernt - zu hohe Verwechslungsgefahr.
+  // Stattdessen löscht das ✕ am Zeilenende mit Kaskaden-Bestätigung das Zimmer.
+  const delZimmerBtn  = '';
 
   // Status-Badge für die Karten-Ansicht (mobile)
   const status = d.gesamt_ergebnis || '';
@@ -1156,6 +1154,16 @@ $('#btn-export-xlsx').addEventListener('click', () => {
 });
 
 $('#btn-print').addEventListener('click', () => window.print());
+
+// Geräte aus Katalog wiederherstellen (nach versehentlichem Löschen)
+$('#btn-reimport-katalog')?.addEventListener('click', async () => {
+  if (!state.protokollId) { toast('Kein Protokoll ausgewählt'); return; }
+  if (!confirm('Fehlende Geräte (basierend auf Nr. im Katalog) jetzt in dieses Protokoll wieder importieren?\n\nBestehende Einträge bleiben unverändert.')) return;
+  const { data, error } = await sb.rpc('reimport_geraete_from_katalog', { p_protokoll: state.protokollId });
+  if (error) { toast('Fehler: ' + error.message); return; }
+  await loadGeraete();
+  toast(`${data ?? 0} Geräte aus dem Katalog wiederhergestellt.`);
+});
 
 /* ------------------------------------------------------------------ *
  *  Init
