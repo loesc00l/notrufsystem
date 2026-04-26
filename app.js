@@ -95,30 +95,80 @@ const CHECK_FIELDS = [
 /* ------------------------------------------------------------------ *
  *  Authentifizierung
  * ------------------------------------------------------------------ */
+function loginMsg(text, color){
+  const el = $('#login-error');
+  el.textContent = text || '';
+  el.style.color = color || '';
+}
+
 $('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  $('#login-error').textContent = '';
-  const email = $('#login-email').value;
+  loginMsg('');
+  const email = ($('#login-email').value || '').trim().toLowerCase();
   const pw    = $('#login-password').value;
+  if (!email || !pw) { loginMsg('Bitte E-Mail und Passwort eingeben.'); return; }
+  $('#login-email').value = email; // normalisiert zurückspielen
   const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
-  if (error) { $('#login-error').textContent = error.message; return; }
+  if (error) {
+    // Häufigster Fall: falsches PW oder unbestätigter Account
+    let hint = error.message;
+    if (/Invalid login credentials/i.test(error.message)) {
+      hint = 'Anmeldung fehlgeschlagen. Mögliche Ursachen:\n'
+           + '• Passwort falsch (Caps-Lock?)\n'
+           + '• Account existiert nicht — auf "Registrieren" klicken\n'
+           + '• Account nicht bestätigt — Bestätigungs-Mail prüfen oder unten "Passwort vergessen" nutzen';
+    } else if (/Email not confirmed/i.test(error.message)) {
+      hint = 'E-Mail noch nicht bestätigt. Bitte den Link in der Registrierungs-Mail anklicken oder "Passwort vergessen" verwenden.';
+    }
+    loginMsg(hint);
+    return;
+  }
   afterLogin(data.user);
 });
 
 $('#btn-signup').addEventListener('click', async () => {
-  $('#login-error').textContent = '';
-  const email = $('#login-email').value;
+  loginMsg('');
+  const email = ($('#login-email').value || '').trim().toLowerCase();
   const pw    = $('#login-password').value;
-  if (!email || !pw) { $('#login-error').textContent = 'E-Mail und Passwort eingeben.'; return; }
+  if (!email || !pw) { loginMsg('E-Mail und Passwort eingeben.'); return; }
+  $('#login-email').value = email;
   const { data, error } = await sb.auth.signUp({ email, password: pw });
-  if (error) { $('#login-error').textContent = error.message; return; }
+  if (error) { loginMsg(error.message); return; }
   if (data.user && !data.session) {
-    $('#login-error').style.color = 'green';
-    $('#login-error').textContent = 'Bestätigungs-E-Mail gesendet. Bitte prüfen und danach anmelden.';
+    loginMsg('Bestätigungs-E-Mail gesendet (' + email + '). Bitte prüfen (auch Spam-Ordner) und danach anmelden.', 'green');
   } else {
     afterLogin(data.user);
   }
 });
+
+$('#btn-forgot').addEventListener('click', async () => {
+  loginMsg('');
+  const email = ($('#login-email').value || '').trim().toLowerCase();
+  if (!email) { loginMsg('Bitte zuerst die E-Mail-Adresse oben eintragen.'); return; }
+  const redirectTo = window.location.origin + window.location.pathname;
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) { loginMsg(error.message); return; }
+  loginMsg('E-Mail zum Zurücksetzen des Passworts wurde an ' + email + ' geschickt. Bitte Postfach prüfen (auch Spam).', 'green');
+});
+
+// Wenn der Nutzer per Reset-Link kommt (#access_token=... in URL), Passwort-Setzen anbieten
+(async () => {
+  const hash = window.location.hash || '';
+  if (hash.includes('type=recovery') || hash.includes('access_token=')) {
+    // Supabase verarbeitet den Hash automatisch in detectSessionInUrl
+    setTimeout(async () => {
+      const { data } = await sb.auth.getSession();
+      if (data.session) {
+        const newPw = prompt('Neues Passwort eingeben (mindestens 6 Zeichen):');
+        if (newPw && newPw.length >= 6) {
+          const { error } = await sb.auth.updateUser({ password: newPw });
+          if (error) alert('Passwort-Reset fehlgeschlagen: ' + error.message);
+          else      alert('Passwort wurde aktualisiert. Du bist jetzt angemeldet.');
+        }
+      }
+    }, 400);
+  }
+})();
 
 $('#btn-logout').addEventListener('click', async () => {
   await sb.auth.signOut();
@@ -1085,7 +1135,6 @@ $('#btn-export-xlsx').addEventListener('click', () => {
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([mHeader, ...mRows]), 'Mängel');
 
-  // Optional: Historie auch als Sheet (alle Runden)
   if (state.historie && state.historie.length) {
     const hHeader = ['Archiviert am','Nr.','Raumname','Zimmer','Bett','Sicht','Bef.','Ruf','Opt.','Quitt.','Gesamt','Bemerkung','Prüfer','Datum / Zeit'];
     const hRows = state.historie.map(h => [
